@@ -34,6 +34,33 @@ import {
   resolveModuleSignaturePolicy,
   verifyModuleArtifact,
 } from "../bundle/signing.js";
+import { extractPublicationRecordCollection } from "../transport/records.js";
+
+/**
+ * Reduce a module artifact to the bytes a wasm engine can compile.
+ *
+ * Signed/published artifacts carry an appended publication record collection
+ * (MBL bundle with the sds.signature entry, PNM/REC trailers). Wasm engines
+ * reject those trailing bytes ("unknown section code"), so the canonical
+ * module payload must be extracted before compile. ENC-protected payloads
+ * cannot be loaded here — decryption is a host concern.
+ *
+ * @param {Uint8Array} bytes - raw artifact bytes
+ * @returns {Uint8Array} compilable wasm bytes
+ */
+export function toLoadableWasmBytes(bytes) {
+  const publication = extractPublicationRecordCollection(bytes);
+  if (!publication) {
+    return bytes;
+  }
+  if (publication.enc) {
+    throw new ModuleSignatureError(
+      "encrypted_artifact",
+      "Module artifact payload is ENC-protected; decrypt it before loading.",
+    );
+  }
+  return publication.payloadBytes;
+}
 
 const STANDALONE_SHARED_MEMORY_ENV_STUBS = Object.freeze({
   pthread_mutex_lock: () => 0,
@@ -130,14 +157,21 @@ async function compileWasmModule(source) {
   if (source instanceof WebAssembly.Module) {
     return source;
   }
+  let bytes;
   if (source instanceof Response) {
-    return WebAssembly.compileStreaming(source);
+    bytes = new Uint8Array(await source.arrayBuffer());
+  } else if (typeof source === "string") {
+    const response = await fetch(source);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch module artifact: ${response.status}`);
+    }
+    bytes = new Uint8Array(await response.arrayBuffer());
+  } else {
+    bytes = source instanceof ArrayBuffer ? new Uint8Array(source) : source;
   }
-  if (typeof source === "string") {
-    return WebAssembly.compileStreaming(fetch(source));
-  }
-  const bytes = source instanceof ArrayBuffer ? new Uint8Array(source) : source;
-  return WebAssembly.compile(bytes);
+  // Strip any appended publication record collection (signature/PNM/REC
+  // trailers) — wasm engines reject trailing non-section bytes.
+  return WebAssembly.compile(toLoadableWasmBytes(bytes));
 }
 
 const WASM_PAGE_BYTES = 65536;

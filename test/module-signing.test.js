@@ -222,19 +222,28 @@ test("loadModule accepts a signed artifact under the same policy (verification p
   const dir = await mkdtemp(path.join(tmpdir(), "sdm-signing-"));
   const wasmPath = path.join(dir, "signed.wasm");
   await writeFile(wasmPath, signed.wasmBytes);
-  // The test wasm is not a real module, so loading proceeds past signature
-  // verification and then fails later in the runtime layer — assert the
-  // failure is NOT a signature error.
-  await assert.rejects(
-    loadModule({
+  // Loading must proceed past signature verification: the loader strips the
+  // appended publication record collection (signature trailer) before
+  // compiling/launching, so a trusted signed artifact reaches runtime
+  // selection. If the minimal test wasm still fails in the runtime layer,
+  // that failure must NOT be a signature error.
+  let harness = null;
+  try {
+    harness = await loadModule({
       wasmSource: wasmPath,
       verifySignature: {
         trustedPublicKeys: [keypair.publicKeyHex],
         requireSignature: true,
       },
-    }),
-    (error) => !(error instanceof ModuleSignatureError),
-  );
+    });
+  } catch (error) {
+    assert.ok(
+      !(error instanceof ModuleSignatureError),
+      `signature verification must pass for a trusted signed artifact: ${error}`,
+    );
+  } finally {
+    await harness?.destroy?.();
+  }
 });
 
 test("resolveModuleSignaturePolicy resolves explicit, env, and global sources", async () => {

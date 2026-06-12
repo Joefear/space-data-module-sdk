@@ -21,6 +21,7 @@ import {
   decodePlgManifest,
   isPlgManifestBuffer,
 } from "../manifest/plgCodec.js";
+import { stripPublicationRecordCollection } from "../transport/records.js";
 
 const RecommendedCapabilitySet = new Set(RecommendedCapabilityIds);
 const StandaloneWasiCapabilitySet = new Set(StandaloneWasiCapabilityIds);
@@ -1352,7 +1353,9 @@ export async function loadManifestFromFile(manifestPath) {
 }
 
 export function getWasmExportNames(wasmBytes) {
-  const module = new WebAssembly.Module(wasmBytes);
+  // Tolerate signed/published artifacts: strip any appended publication
+  // record collection (signature/PNM/REC trailers) before compiling.
+  const module = new WebAssembly.Module(stripPublicationRecordCollection(wasmBytes));
   return WebAssembly.Module.exports(module).map((entry) => entry.name).sort();
 }
 
