@@ -16,7 +16,7 @@ import { createBrowserWasiShim, WasiExitError } from "../host/wasiShim.js";
 import { createBrowserHost } from "../host/browserHost.js";
 import { getWasmWallet } from "../utils/wasmCrypto.js";
 import {
-  createJsonHostcallBridge,
+  createHostcallBridge,
   createAsyncHostDispatcher,
   createHostSyncDispatcher,
   DEFAULT_HOSTCALL_IMPORT_MODULE,
@@ -26,6 +26,7 @@ import {
   DefaultManifestExports,
 } from "../runtime/constants.js";
 import {
+  INVOKE_ARENA_ALIGNMENT,
   encodePluginInvokeRequest,
   decodePluginInvokeResponse,
 } from "../invoke/codec.js";
@@ -257,7 +258,7 @@ async function instantiateBrowserModule(options = {}) {
   let memory = providedMemory;
   if (needsHostBridge) {
     const dispatch = createHostSyncDispatcher(options.host);
-    bridge = createJsonHostcallBridge({
+    bridge = createHostcallBridge({
       dispatch,
       getMemory: () => memory ?? instance?.exports?.memory,
     });
@@ -391,6 +392,11 @@ export async function createBrowserModuleHarness(options = {}) {
     const reqLen = requestBytes.length;
     const reqPtr = alloc(reqLen);
     if (!reqPtr) throw new Error("plugin_alloc returned null for request.");
+    if (reqPtr % INVOKE_ARENA_ALIGNMENT !== 0) {
+      throw new Error(
+        `plugin_alloc returned a request pointer (${reqPtr}) that is not ${INVOKE_ARENA_ALIGNMENT}-byte aligned.`,
+      );
+    }
 
     new Uint8Array(memory.buffer, reqPtr, reqLen).set(requestBytes);
 
@@ -408,6 +414,11 @@ export async function createBrowserModuleHarness(options = {}) {
 
     if (!resPtr || !resLen) {
       throw new Error("plugin_invoke_stream returned null response.");
+    }
+    if (resPtr % INVOKE_ARENA_ALIGNMENT !== 0) {
+      throw new Error(
+        `plugin_invoke_stream returned a response pointer (${resPtr}) that is not ${INVOKE_ARENA_ALIGNMENT}-byte aligned.`,
+      );
     }
 
     const responseBytes = new Uint8Array(memory.buffer, resPtr, resLen).slice();

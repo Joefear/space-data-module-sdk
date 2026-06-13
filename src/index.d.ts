@@ -195,6 +195,26 @@ export function encodePluginInvokeResponse(
 export function decodePluginInvokeResponse(
   data: Uint8Array | ArrayBuffer | ArrayBufferView,
 ): PluginInvokeResponseEnvelope;
+/**
+ * Alignment (bytes) guaranteed for the payload arena base of every encoded
+ * invoke envelope, as an absolute address at every host<->module hop.
+ */
+export const INVOKE_ARENA_ALIGNMENT: number;
+export function assertAlignedInvokeBuffer(
+  bytes: Uint8Array,
+  arenaArray: Uint8Array | null,
+  kind: "request" | "response",
+  arenaAlignment?: number,
+): void;
+/**
+ * Zero-copy module-to-module hop: reuse a decoded output frame (payload view
+ * and type metadata) as an input frame for the next invocation without any
+ * decode/re-serialize round-trip.
+ */
+export function forwardOutputFrameAsInput(
+  outputFrame: InvokeFrame,
+  overrides?: Partial<InvokeFrame>,
+): InvokeFrame;
 export function normalizeInvokeSurfaceName(
   value: InvokeSurface | number | string | null | undefined,
 ): InvokeSurface | null;
@@ -1177,8 +1197,7 @@ export interface HostcallBridge {
   imports: Record<string, Record<string, (...args: number[]) => number>>;
   getLastEnvelope(): unknown;
   getLastResponseBytes(): Uint8Array;
-  getLastResponseText(): string;
-  getLastResponseJson(): unknown;
+  getLastResponseEnvelope(): unknown;
 }
 
 export interface BrowserFilesystemShim {
@@ -1715,7 +1734,7 @@ export function dispatchNodeHostSyncOperation(
 export function createNodeHostSyncDispatcher(
   host: NodeHost,
 ): (operation: string, params?: unknown) => unknown;
-export function createJsonHostcallBridge(options: {
+export function createHostcallBridge(options: {
   dispatch: (operation: string, params?: unknown) => unknown;
   getMemory: () => { buffer: ArrayBuffer | SharedArrayBuffer };
   moduleName?: string;

@@ -204,6 +204,7 @@ export function generateInvokeSupportSource({ manifest = {}, includeCommandMain 
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <stdlib.h>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -243,8 +244,19 @@ struct InputFrameOwned {
   std::string schema_name{};
   std::string file_identifier{};
   std::string root_type_name{};
+  // Owned storage is only used for the raw stdin shortcut path; the direct
+  // invoke path points views straight into the (8-aligned) request arena.
   std::vector<uint8_t> payload{};
 };
+
+// Alignment guaranteed for every FlatBuffer base crossing the host<->module
+// boundary: the host-allocated request region, the module-returned response
+// pointer, and the payload arena inside each invoke envelope.
+constexpr uint32_t kInvokeArenaAlignment = 8u;
+// plugin_alloc hands out 16-aligned regions so frames declaring
+// required_alignment up to 16 (e.g. SIMD/aligned-binary state vectors) hold
+// as absolute addresses in linear memory.
+constexpr uint32_t kInvokeAllocAlignment = 16u;
 
 struct OutputFrameOwned {
   std::string port_id{};
@@ -398,6 +410,77 @@ static bool LoadInputsFromRequest(const orbpro::invoke::PluginInvokeRequestT &re
   return true;
 }
 
+// Zero-copy input loading for the direct invoke path: frame payload views
+// point straight into the verified request buffer's payload arena instead of
+// being copied into per-frame vectors. The request buffer outlives the method
+// handler (it is owned by the caller of plugin_invoke_stream / main), and the
+// 8-aligned arena base makes every declared frame alignment hold in place.
+static bool LoadInputsFromRequestTable(const orbpro::invoke::PluginInvokeRequest *request) {
+  g_invoke_context.inputs.clear();
+
+  const auto *frames = request->input_frames();
+  const auto *arena = request->payload_arena();
+  const uint8_t *arena_data = arena ? arena->data() : nullptr;
+  const size_t arena_size = arena ? arena->size() : 0u;
+  if (frames == nullptr || frames->size() == 0u) {
+    return true;
+  }
+
+  g_invoke_context.inputs.reserve(frames->size());
+  for (const auto *frame : *frames) {
+    if (!frame) {
+      continue;
+    }
+    const auto payload_offset = static_cast<size_t>(frame->offset());
+    const auto payload_size = static_cast<size_t>(frame->size());
+    if (payload_offset + payload_size > arena_size) {
+      SetError("invalid-request-frame", "Input frame payload range exceeds request payload arena.");
+      return false;
+    }
+    const uint8_t *payload_ptr = payload_size > 0u ? arena_data + payload_offset : nullptr;
+    const auto *type_ref = frame->type_ref();
+    const uint16_t required_alignment = type_ref ? type_ref->required_alignment() : 0u;
+    if (payload_ptr && required_alignment > 1u &&
+        (reinterpret_cast<uintptr_t>(payload_ptr) % required_alignment) != 0u) {
+      SetError("misaligned-input-frame", "Input frame payload violates its declared required alignment.");
+      return false;
+    }
+
+    g_invoke_context.inputs.emplace_back();
+    auto &owned = g_invoke_context.inputs.back();
+    owned = InputFrameOwned{};
+    owned.port_id = frame->port_id() ? frame->port_id()->str() : std::string();
+    if (type_ref) {
+      owned.schema_name = type_ref->schema_name() ? type_ref->schema_name()->str() : std::string();
+      owned.file_identifier = type_ref->file_identifier() ? type_ref->file_identifier()->str() : std::string();
+      owned.root_type_name = type_ref->root_type_name() ? type_ref->root_type_name()->str() : std::string();
+    }
+
+    owned.view.port_id = owned.port_id.empty() ? nullptr : owned.port_id.c_str();
+    owned.view.schema_name = owned.schema_name.empty() ? nullptr : owned.schema_name.c_str();
+    owned.view.file_identifier = owned.file_identifier.empty() ? nullptr : owned.file_identifier.c_str();
+    owned.view.wire_format =
+      type_ref
+        ? static_cast<uint32_t>(type_ref->wire_format())
+        : static_cast<uint32_t>(orbpro::stream::PayloadWireFormat_Flatbuffer);
+    owned.view.root_type_name = owned.root_type_name.empty() ? nullptr : owned.root_type_name.c_str();
+    owned.view.fixed_string_length = type_ref ? type_ref->fixed_string_length() : 0;
+    owned.view.byte_length = type_ref ? type_ref->byte_length() : static_cast<uint32_t>(payload_size);
+    owned.view.required_alignment = required_alignment;
+    owned.view.alignment = frame->alignment();
+    owned.view.size = frame->size();
+    owned.view.generation = frame->generation();
+    owned.view.trace_id = frame->trace_id();
+    owned.view.stream_id = frame->stream_id();
+    owned.view.sequence = frame->sequence();
+    owned.view.end_of_stream = frame->end_of_stream() ? 1 : 0;
+    owned.view.payload = payload_ptr;
+    owned.view.payload_length = static_cast<uint32_t>(payload_size);
+  }
+
+  return true;
+}
+
 static bool ValidateRequiredInputs(const MethodDescriptor *method) {
   if (!method) {
     return false;
@@ -478,8 +561,61 @@ static orbpro::invoke::PluginInvokeResponseT BuildResponseObject() {
 
 static std::vector<uint8_t> SerializeResponse(const orbpro::invoke::PluginInvokeResponseT &response) {
   ::flatbuffers::FlatBufferBuilder builder(1024);
-  const auto root = orbpro::invoke::CreatePluginInvokeResponse(builder, &response);
+
+  std::vector<::flatbuffers::Offset<orbpro::stream::TypedArenaBuffer>> frame_offsets;
+  frame_offsets.reserve(response.output_frames.size());
+  for (const auto &frame : response.output_frames) {
+    frame_offsets.emplace_back(
+      orbpro::stream::CreateTypedArenaBuffer(builder, frame.get())
+    );
+  }
+  const auto output_frames = builder.CreateVector(frame_offsets);
+
+  // Force the payload arena base onto the invoke arena alignment (or the
+  // largest frame alignment, if greater) so frame offsets — which are packed
+  // aligned inside the arena — stay aligned as absolute addresses once the
+  // host copies the response buffer to an aligned base.
+  size_t arena_alignment = static_cast<size_t>(kInvokeArenaAlignment);
+  for (const auto &frame : response.output_frames) {
+    if (frame && static_cast<size_t>(frame->alignment) > arena_alignment) {
+      arena_alignment = static_cast<size_t>(frame->alignment);
+    }
+  }
+  builder.ForceVectorAlignment(
+    response.payload_arena.size(),
+    sizeof(uint8_t),
+    arena_alignment
+  );
+  const auto payload_arena = builder.CreateVector(response.payload_arena);
+  const auto error_code = builder.CreateString(response.error_code);
+  const auto error_message = builder.CreateString(response.error_message);
+
+  const auto root = orbpro::invoke::CreatePluginInvokeResponse(
+    builder,
+    response.status_code,
+    response.yielded,
+    response.backlog_remaining,
+    output_frames,
+    payload_arena,
+    error_code,
+    error_message
+  );
   orbpro::invoke::FinishPluginInvokeResponseBuffer(builder, root);
+
+  // Module-side alignment assertion: the serialized arena must sit on an
+  // 8-byte boundary relative to the buffer base. Fail hard if not.
+  if (!response.payload_arena.empty()) {
+    const auto *serialized =
+      orbpro::invoke::GetPluginInvokeResponse(builder.GetBufferPointer());
+    const auto *arena_vector = serialized->payload_arena();
+    const auto arena_offset = static_cast<size_t>(
+      arena_vector->data() - builder.GetBufferPointer()
+    );
+    if (arena_offset % arena_alignment != 0u) {
+      std::abort();
+    }
+  }
+
   return std::vector<uint8_t>(
     builder.GetBufferPointer(),
     builder.GetBufferPointer() + builder.GetSize()
@@ -549,9 +685,37 @@ static std::vector<uint8_t> DispatchRequestBytes(
     return SerializeErrorResponse(400, "invalid-request", "Invoke request FlatBuffer verification failed.");
   }
 
+  // Zero-copy dispatch: read the request table in place (no UnPack object
+  // copy) and hand the method handler payload views directly into the
+  // request's 8-aligned payload arena.
   const auto *request = orbpro::invoke::GetPluginInvokeRequest(request_bytes);
-  auto request_object = std::unique_ptr<orbpro::invoke::PluginInvokeRequestT>(request->UnPack());
-  return DispatchRequestObject(*request_object, runtime_error);
+  const std::string method_id =
+    request->method_id() ? request->method_id()->str() : std::string();
+  const auto *method = FindMethod(method_id);
+  if (!method) {
+    if (runtime_error) {
+      *runtime_error = true;
+    }
+    return SerializeErrorResponse(
+      404,
+      "unknown-method",
+      std::string("Unknown method: ") + method_id
+    );
+  }
+
+  ResetInvokeContext(method);
+  if (!LoadInputsFromRequestTable(request) || !ValidateRequiredInputs(method)) {
+    if (runtime_error) {
+      *runtime_error = true;
+    }
+    if (g_invoke_context.status_code == 0) {
+      g_invoke_context.status_code = 400;
+    }
+    return SerializeResponse(BuildResponseObject());
+  }
+
+  g_invoke_context.status_code = method->handler ? method->handler() : -1;
+  return SerializeResponse(BuildResponseObject());
 }
 
 static bool ReadAllStdin(std::vector<uint8_t> *bytes_out) {
@@ -745,9 +909,23 @@ extern "C" void plugin_set_error(const char *error_code, const char *error_messa
 }
 
 extern "C" uint32_t plugin_alloc(uint32_t size) {
-  const auto allocation_size = size > 0u ? size : 1u;
-  void *ptr = std::malloc(allocation_size);
-  return ptr ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr)) : 0u;
+  // Every region handed across the host boundary is 8-byte aligned so the
+  // FlatBuffer arena base stays aligned end-to-end. malloc already returns
+  // >=8-aligned blocks on wasm32; this asserts the invariant (fail hard, no
+  // realignment fallback) and rounds the size so allocator metadata cannot
+  // shrink the guarantee.
+  const uint32_t requested = size > 0u ? size : 1u;
+  const uint32_t allocation_size =
+    (requested + (kInvokeAllocAlignment - 1u)) & ~(kInvokeAllocAlignment - 1u);
+  void *ptr = nullptr;
+  if (posix_memalign(&ptr, static_cast<size_t>(kInvokeAllocAlignment), allocation_size) != 0) {
+    return 0u;
+  }
+  if ((reinterpret_cast<uintptr_t>(ptr) % kInvokeAllocAlignment) != 0u) {
+    std::free(ptr);
+    return 0u;
+  }
+  return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
 }
 
 extern "C" void plugin_free(uint32_t ptr, uint32_t size) {
@@ -767,11 +945,21 @@ extern "C" uint32_t plugin_invoke_stream(
   }
 
   bool runtime_error = false;
-  const auto response_bytes = DispatchRequestBytes(
-    ConstPtr(request_ptr),
-    static_cast<size_t>(request_len),
-    &runtime_error
-  );
+  std::vector<uint8_t> response_bytes;
+  if (request_ptr != 0u && (request_ptr % kInvokeArenaAlignment) != 0u) {
+    runtime_error = true;
+    response_bytes = SerializeErrorResponse(
+      400,
+      "misaligned-request",
+      "Invoke request buffer base is not 8-byte aligned."
+    );
+  } else {
+    response_bytes = DispatchRequestBytes(
+      ConstPtr(request_ptr),
+      static_cast<size_t>(request_len),
+      &runtime_error
+    );
+  }
 
   const uint32_t response_ptr = plugin_alloc(static_cast<uint32_t>(response_bytes.size()));
   if (response_ptr == 0u) {

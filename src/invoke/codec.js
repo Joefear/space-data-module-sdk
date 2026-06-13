@@ -1,13 +1,7 @@
 import * as flatbuffers from "../vendor/flatbuffers/flatbuffers.js";
 
-import {
-  PluginInvokeRequest,
-  PluginInvokeRequestT,
-} from "../generated/orbpro/invoke/plugin-invoke-request.js";
-import {
-  PluginInvokeResponse,
-  PluginInvokeResponseT,
-} from "../generated/orbpro/invoke/plugin-invoke-response.js";
+import { PluginInvokeRequest } from "../generated/orbpro/invoke/plugin-invoke-request.js";
+import { PluginInvokeResponse } from "../generated/orbpro/invoke/plugin-invoke-response.js";
 import { InvokeSurface } from "../generated/orbpro/manifest/invoke-surface.js";
 import { BufferMutability } from "../generated/orbpro/stream/buffer-mutability.js";
 import { BufferOwnership } from "../generated/orbpro/stream/buffer-ownership.js";
@@ -123,6 +117,61 @@ function alignOffset(offset, alignment) {
   return remainder === 0 ? offset : offset + alignment - remainder;
 }
 
+/**
+ * Alignment guaranteed for the payload arena base of every encoded
+ * PluginInvokeRequest/PluginInvokeResponse, measured as an absolute byte
+ * address (ArrayBuffer offset 0 / wasm linear memory address 0). Frame
+ * offsets inside the arena are packed to at least their declared alignment,
+ * so an 8-aligned arena base makes every frame's absolute address satisfy
+ * `requiredAlignment` up to 8 without copying.
+ */
+export const INVOKE_ARENA_ALIGNMENT = 8;
+
+/**
+ * Create a ubyte vector whose data is aligned to `alignment` bytes relative
+ * to the finished buffer. The stock generated `createPayloadArenaVector`
+ * only guarantees 1-byte alignment (and writes byte-at-a-time); this helper
+ * forces the arena base onto an 8-byte boundary and bulk-copies the bytes.
+ */
+function createAlignedByteVector(builder, bytes, alignment) {
+  builder.startVector(1, bytes.length, alignment);
+  builder.bb.setPosition((builder.space -= bytes.length));
+  builder.bb.bytes().set(bytes, builder.space);
+  return builder.endVector();
+}
+
+function describeInvokeBufferKind(kind) {
+  return kind === "request" ? "PluginInvokeRequest" : "PluginInvokeResponse";
+}
+
+/**
+ * Assert the invariants item-1 of the comms remediation guarantees:
+ * the encoded buffer base and the payload arena base are both 8-byte
+ * aligned as absolute addresses. Throws on violation — there is no
+ * realignment fallback.
+ */
+export function assertAlignedInvokeBuffer(
+  bytes,
+  arenaArray,
+  kind,
+  arenaAlignment = INVOKE_ARENA_ALIGNMENT,
+) {
+  if (bytes.byteOffset % INVOKE_ARENA_ALIGNMENT !== 0) {
+    throw new Error(
+      `${describeInvokeBufferKind(kind)} buffer base is not ${INVOKE_ARENA_ALIGNMENT}-byte aligned (byteOffset ${bytes.byteOffset}).`,
+    );
+  }
+  if (
+    arenaArray &&
+    arenaArray.length > 0 &&
+    arenaArray.byteOffset % arenaAlignment !== 0
+  ) {
+    throw new Error(
+      `${describeInvokeBufferKind(kind)} payload arena base is not ${arenaAlignment}-byte aligned (byteOffset ${arenaArray.byteOffset}).`,
+    );
+  }
+}
+
 function normalizeArenaFrame(frame = {}, offset) {
   const payload = toUint8Array(frame.payload ?? new Uint8Array()) ?? new Uint8Array();
   const typeRef = toFlatBufferTypeRefT(frame.typeRef ?? frame.allowedType ?? {}, payload.length);
@@ -158,9 +207,13 @@ function packArenaFrames(frames = []) {
   const packedFrames = [];
   const normalizedFrames = [];
   let offset = 0;
+  let arenaAlignment = INVOKE_ARENA_ALIGNMENT;
   for (const frame of frames) {
     const normalized = normalizeArenaFrame(frame, offset);
     offset = normalized.buffer.offset + normalized.buffer.size;
+    if (normalized.buffer.alignment > arenaAlignment) {
+      arenaAlignment = normalized.buffer.alignment;
+    }
     packedFrames.push(normalized.buffer);
     normalizedFrames.push(normalized);
   }
@@ -172,6 +225,7 @@ function packArenaFrames(frames = []) {
   return {
     frames: packedFrames,
     arena,
+    arenaAlignment,
   };
 }
 
@@ -179,6 +233,17 @@ function materializeArenaFrames(frames = [], arenaBytes) {
   return frames.map((frame) => {
     const offset = normalizeUnsignedInteger(frame.offset);
     const size = normalizeUnsignedInteger(frame.size);
+    const requiredAlignment = normalizeUnsignedInteger(
+      frame.typeRef?.requiredAlignment,
+    );
+    if (requiredAlignment > 1 && size > 0) {
+      const absoluteOffset = arenaBytes.byteOffset + offset;
+      if (absoluteOffset % requiredAlignment !== 0) {
+        throw new Error(
+          `Arena frame "${frame.portId ?? ""}" payload is misaligned: absolute offset ${absoluteOffset} violates requiredAlignment ${requiredAlignment}.`,
+        );
+      }
+    }
     const payload = arenaBytes.subarray(offset, offset + size);
     return {
       ...frame,
@@ -236,22 +301,38 @@ function decodeArenaFrames(length, accessor) {
   return frames;
 }
 
-function encodeRoot(builderFactory, finish, value) {
-  const builder = new flatbuffers.Builder(1024);
-  finish(builder, builderFactory(value).pack(builder));
-  return builder.asUint8Array();
+function packFrameOffsets(builder, frames) {
+  return frames.map((frame) => frame.pack(builder));
 }
 
 export function encodePluginInvokeRequest(request = {}) {
-  const { frames, arena } = packArenaFrames(
+  const { frames, arena, arenaAlignment } = packArenaFrames(
     Array.isArray(request.inputs) ? request.inputs : request.inputFrames ?? [],
   );
-  return encodeRoot(
-    (value) =>
-      new PluginInvokeRequestT(value.methodId ?? null, frames, arena),
-    PluginInvokeRequest.finishPluginInvokeRequestBuffer,
-    request,
+  const builder = new flatbuffers.Builder(1024);
+  const methodIdOffset =
+    request.methodId !== null && request.methodId !== undefined
+      ? builder.createString(String(request.methodId))
+      : 0;
+  const framesVector = PluginInvokeRequest.createInputFramesVector(
+    builder,
+    packFrameOffsets(builder, frames),
   );
+  const arenaVector = createAlignedByteVector(builder, arena, arenaAlignment);
+  PluginInvokeRequest.startPluginInvokeRequest(builder);
+  PluginInvokeRequest.addMethodId(builder, methodIdOffset);
+  PluginInvokeRequest.addInputFrames(builder, framesVector);
+  PluginInvokeRequest.addPayloadArena(builder, arenaVector);
+  PluginInvokeRequest.finishPluginInvokeRequestBuffer(
+    builder,
+    PluginInvokeRequest.endPluginInvokeRequest(builder),
+  );
+  const bytes = builder.asUint8Array();
+  const root = PluginInvokeRequest.getRootAsPluginInvokeRequest(
+    new flatbuffers.ByteBuffer(bytes),
+  );
+  assertAlignedInvokeBuffer(bytes, root.payloadArenaArray(), "request", arenaAlignment);
+  return bytes;
 }
 
 export function decodePluginInvokeRequest(data) {
@@ -274,23 +355,44 @@ export function decodePluginInvokeRequest(data) {
 }
 
 export function encodePluginInvokeResponse(response = {}) {
-  const { frames, arena } = packArenaFrames(
+  const { frames, arena, arenaAlignment } = packArenaFrames(
     Array.isArray(response.outputs) ? response.outputs : response.outputFrames ?? [],
   );
-  return encodeRoot(
-    (value) =>
-      new PluginInvokeResponseT(
-        Number(value.statusCode ?? 0),
-        value.yielded === true,
-        normalizeUnsignedInteger(value.backlogRemaining),
-        frames,
-        arena,
-        value.errorCode ?? null,
-        value.errorMessage ?? null,
-      ),
-    PluginInvokeResponse.finishPluginInvokeResponseBuffer,
-    response,
+  const builder = new flatbuffers.Builder(1024);
+  const errorCodeOffset =
+    response.errorCode !== null && response.errorCode !== undefined
+      ? builder.createString(String(response.errorCode))
+      : 0;
+  const errorMessageOffset =
+    response.errorMessage !== null && response.errorMessage !== undefined
+      ? builder.createString(String(response.errorMessage))
+      : 0;
+  const framesVector = PluginInvokeResponse.createOutputFramesVector(
+    builder,
+    packFrameOffsets(builder, frames),
   );
+  const arenaVector = createAlignedByteVector(builder, arena, arenaAlignment);
+  PluginInvokeResponse.startPluginInvokeResponse(builder);
+  PluginInvokeResponse.addStatusCode(builder, Number(response.statusCode ?? 0));
+  PluginInvokeResponse.addYielded(builder, response.yielded === true);
+  PluginInvokeResponse.addBacklogRemaining(
+    builder,
+    normalizeUnsignedInteger(response.backlogRemaining),
+  );
+  PluginInvokeResponse.addOutputFrames(builder, framesVector);
+  PluginInvokeResponse.addPayloadArena(builder, arenaVector);
+  PluginInvokeResponse.addErrorCode(builder, errorCodeOffset);
+  PluginInvokeResponse.addErrorMessage(builder, errorMessageOffset);
+  PluginInvokeResponse.finishPluginInvokeResponseBuffer(
+    builder,
+    PluginInvokeResponse.endPluginInvokeResponse(builder),
+  );
+  const bytes = builder.asUint8Array();
+  const root = PluginInvokeResponse.getRootAsPluginInvokeResponse(
+    new flatbuffers.ByteBuffer(bytes),
+  );
+  assertAlignedInvokeBuffer(bytes, root.payloadArenaArray(), "response", arenaAlignment);
+  return bytes;
 }
 
 export function decodePluginInvokeResponse(data) {
@@ -313,6 +415,55 @@ export function decodePluginInvokeResponse(data) {
     payloadArena: arena,
     errorCode: root.errorCode() ?? null,
     errorMessage: root.errorMessage() ?? null,
+  };
+}
+
+/**
+ * Forward a decoded output frame of one module invocation directly as an
+ * input frame for the next invocation — the zero-copy module-to-module hop.
+ *
+ * The returned descriptor references the SAME payload bytes (a view into the
+ * producer's response arena); no JSON/FlatBuffer decode or re-serialization
+ * happens on the hop. `encodePluginInvokeRequest` copies those bytes exactly
+ * once into the consumer's request arena (the unavoidable transfer into the
+ * next module's linear memory), preserving them byte-for-byte.
+ *
+ * @param {Object} outputFrame - a frame from decodePluginInvokeResponse().outputs
+ * @param {Object} [overrides] - per-hop overrides; `portId` is required when
+ *   the consumer's input port differs from the producer's output port.
+ * @returns {Object} input frame descriptor for encodePluginInvokeRequest
+ */
+export function forwardOutputFrameAsInput(outputFrame, overrides = {}) {
+  if (!outputFrame || typeof outputFrame !== "object") {
+    throw new TypeError(
+      "forwardOutputFrameAsInput requires a decoded output frame.",
+    );
+  }
+  const payload = toUint8Array(outputFrame.payload);
+  if (!payload) {
+    throw new TypeError(
+      "forwardOutputFrameAsInput requires an output frame with payload bytes.",
+    );
+  }
+  const portId = overrides.portId ?? outputFrame.portId ?? null;
+  if (!portId) {
+    throw new TypeError(
+      "forwardOutputFrameAsInput requires a portId (from the frame or overrides).",
+    );
+  }
+  return {
+    portId,
+    payload,
+    typeRef: overrides.typeRef ?? outputFrame.typeRef ?? null,
+    alignment:
+      overrides.alignment ??
+      (outputFrame.alignment > 0 ? outputFrame.alignment : undefined),
+    generation: overrides.generation ?? outputFrame.generation,
+    traceId: overrides.traceId ?? outputFrame.traceId,
+    streamId: overrides.streamId ?? outputFrame.streamId,
+    sequence: overrides.sequence ?? outputFrame.sequence,
+    endOfStream:
+      overrides.endOfStream ?? (outputFrame.endOfStream === true || undefined),
   };
 }
 
