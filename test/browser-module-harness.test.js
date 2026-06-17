@@ -8,6 +8,7 @@ import {
 import {
   createBrowserModuleHarness,
   detectArtifactProfile,
+  isSharedArrayBufferLike,
 } from "../src/testing/browserModuleHarness.js";
 
 const IMPORTED_SHARED_MEMORY_WASM_BYTES = new Uint8Array([
@@ -129,6 +130,21 @@ function createManifest() {
     ],
   };
 }
+
+test("browser module harness accepts shared buffers by intrinsic tag", () => {
+  const taggedSharedBuffer = {
+    get [Symbol.toStringTag]() {
+      return "SharedArrayBuffer";
+    },
+  };
+
+  assert.equal(
+    Object.prototype.toString.call(taggedSharedBuffer),
+    "[object SharedArrayBuffer]",
+  );
+  assert.equal(isSharedArrayBufferLike(taggedSharedBuffer), true);
+  assert.equal(isSharedArrayBufferLike(new ArrayBuffer(1)), false);
+});
 
 function createEchoSource() {
   return `#include <stdint.h>

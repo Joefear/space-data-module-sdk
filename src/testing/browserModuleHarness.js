@@ -178,6 +178,17 @@ async function compileWasmModule(source) {
 const WASM_PAGE_BYTES = 65536;
 const DEFAULT_IMPORTED_MEMORY_INITIAL_BYTES = 64 * 1024 * 1024;
 const DEFAULT_IMPORTED_MEMORY_MAXIMUM_BYTES = 2 * 1024 * 1024 * 1024;
+const SHARED_ARRAY_BUFFER_TAG = "[object SharedArrayBuffer]";
+
+export function isSharedArrayBufferLike(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    ((typeof SharedArrayBuffer === "function" &&
+      value instanceof SharedArrayBuffer) ||
+      Object.prototype.toString.call(value) === SHARED_ARRAY_BUFFER_TAG)
+  );
+}
 
 function bytesToPages(value, fallbackBytes) {
   const bytes =
@@ -283,7 +294,7 @@ async function instantiateBrowserModule(options = {}) {
   if (memory) {
     if (
       options.sharedMemory === true &&
-      !(memory.buffer instanceof SharedArrayBuffer)
+      !isSharedArrayBufferLike(memory.buffer)
     ) {
       throw new Error(
         "Browser module harness sharedMemory requires shared WebAssembly.Memory backing.",
