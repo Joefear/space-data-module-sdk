@@ -6,12 +6,11 @@ import {
   HostCapabilityT,
   PluginFamily,
   PluginManifest,
-  PluginManifestT,
 } from "../generated/orbpro/manifest.js";
 import { normalizeInvokeSurfaceName } from "../invoke/codec.js";
 import { toUint8Array } from "../runtime/bufferLike.js";
-import { toEmbeddedPluginManifest } from "./normalize.js";
-import { decodePlgManifest, isPlgManifestBuffer } from "./plgCodec.js";
+import { legacyManifestToPlg } from "./legacyToPlg.js";
+import { decodePlgManifest, encodePlgManifest, isPlgManifestBuffer } from "./plgCodec.js";
 
 function toByteBuffer(data) {
   if (data instanceof flatbuffers.ByteBuffer) {
@@ -43,6 +42,34 @@ function normalizePluginFamilyName(value) {
     return normalizeEnumName(PluginFamily[value], { separator: "_" });
   }
   return normalizeEnumName(value, { separator: "_" });
+}
+
+function normalizePlgPluginFamilyName(value) {
+  if (typeof value === "number") {
+    switch (value) {
+      case 0:
+        return "sensor";
+      case 1:
+        return "propagator";
+      case 2:
+        return "renderer";
+      case 4:
+        return "data_source";
+      case 5:
+        return "ew";
+      case 6:
+        return "comms";
+      case 7:
+        return "physics";
+      case 8:
+        return "shader";
+      case 3:
+      default:
+        return "analysis";
+    }
+  }
+  const normalized = normalizeEnumName(value, { separator: "_" });
+  return normalized === "datasource" ? "data_source" : normalized;
 }
 
 function normalizeDrainPolicyName(value) {
@@ -156,15 +183,42 @@ function methodFromPlgEntry(entry = {}) {
 }
 
 function normalizeDecodedPlgManifest(manifest = {}) {
-  const methods = Array.isArray(manifest.entryFunctions)
+  const methods = Array.isArray(manifest.methods) && manifest.methods.length > 0
+    ? manifest.methods.map((method) => normalizeDecodedMethod(method))
+    : Array.isArray(manifest.entryFunctions)
     ? manifest.entryFunctions.map((entry) => methodFromPlgEntry(entry)).filter(Boolean)
     : [];
+  const hostCapabilities = Array.isArray(manifest.hostCapabilities)
+    ? manifest.hostCapabilities
+    : [];
+  const capabilities = hostCapabilities.length > 0
+    ? hostCapabilities.map((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        if (entry.scope || entry.description || entry.required === false) {
+          return entry;
+        }
+        return entry.capability;
+      }).filter(Boolean)
+    : Array.isArray(manifest.capabilities)
+      ? manifest.capabilities.map((entry) => {
+          if (typeof entry === "string") {
+            return entry;
+          }
+          if (entry?.name && entry.required !== false && !entry.version) {
+            return entry.name;
+          }
+          return entry;
+        })
+      : [];
   return {
     ...manifest,
+    pluginFamily:
+      manifest.pluginFamily ?? normalizePlgPluginFamilyName(manifest.pluginType),
     methods,
-    capabilities: Array.isArray(manifest.capabilities)
-      ? manifest.capabilities
-      : [],
+    capabilities,
+    hostCapabilities,
     invokeSurfaces: Array.isArray(manifest.invokeSurfaces)
       ? manifest.invokeSurfaces
           .map((value) => normalizeInvokeSurfaceName(value))
@@ -202,11 +256,5 @@ export function decodePluginManifest(data) {
 }
 
 export function encodePluginManifest(manifest) {
-  const value =
-    manifest instanceof PluginManifestT
-      ? manifest
-      : toEmbeddedPluginManifest(manifest).manifest;
-  const builder = new flatbuffers.Builder(1024);
-  PluginManifest.finishPluginManifestBuffer(builder, value.pack(builder));
-  return builder.asUint8Array();
+  return encodePlgManifest(legacyManifestToPlg(manifest));
 }

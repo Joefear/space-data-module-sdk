@@ -107,16 +107,39 @@ Modules can now declare one or both canonical invoke surfaces in
 - `direct`: in-memory invocation through `plugin_invoke_stream`
 - `command`: WASI command-mode invocation through `_start`
 
-Both surfaces consume and produce the same FlatBuffer envelopes:
+Both surfaces consume and produce the SDS `PIV` FlatBuffer envelope
+(`file_identifier "$PIV"`). `PIV.REQUEST` and `PIV.RESPONSE` route SDS payload
+frames by `TAB.PORT_ID` using a shared `PAYLOAD_ARENA`. `TAB.WIRE_FORMAT`
+declares whether each frame body is a regular FlatBuffer or an aligned-binary
+payload. Command mode reads one `PIV` request from `stdin` and writes one `PIV`
+response to `stdout`. Direct mode takes the same request bytes from guest
+memory and returns response bytes in guest memory. Direct-mode hosts must pass
+request and response-length pointers allocated by the module's `plugin_alloc`;
+the generated bridge validates those guest-memory ranges and returns a
+canonical `invalid-request-pointer` response, or `0` for an invalid
+response-length pointer, instead of dereferencing arbitrary addresses. When a
+PIV request has an empty `PAYLOAD_ARENA`, the generated direct bridge treats
+`TAB.OFFSET` as an absolute guest-memory pointer only if that range was
+allocated by `plugin_alloc`; otherwise it fails closed with
+`invalid-request-pointer`. Public JS decoders can materialize the same
+empty-arena TAB offsets by passing `{ externalArena }` to
+`decodePluginInvokeRequest` or `decodePluginInvokeResponse`.
 
-- `PluginInvokeRequest`
-- `PluginInvokeResponse`
+The older SDK-local `PluginInvokeRequest` / `PluginInvokeResponse` envelopes
+(`PINQ` / `PINS`) are legacy compatibility adapters. Public SDK encoders now
+emit `PIV` by default; public decoders accept `PIV` first and fall back to
+`PINQ` / `PINS` only for existing artifacts or tests that explicitly use the
+legacy helpers.
 
-Those envelopes route SDS payload frames by `portId` using
-`TypedArenaBuffer.fbs` and a shared payload arena. Command mode reads one
-request from `stdin` and writes one response to `stdout`. Direct mode takes the
-same request bytes from guest memory and returns response bytes in guest
-memory.
+SDS `TAB` is the canonical transport descriptor. It preserves port id, payload
+offset/size, alignment, wire format, type identity, ownership, mutability, and
+frame id. SDK-local `TABF` fields such as generation, stream id, sequence,
+fixed string length, and declared byte length are legacy-only unless SDS adds
+first-class fields for them later. For stream-pump compatibility, the SDK uses
+`TAB.FRAME_ID` as packed stream bookkeeping: `(sequence << 1) | endOfStream`.
+Source-built modules can set this on an emitted output frame with
+`plugin_set_output_stream_frame(outputIndex, sequence, endOfStream)` or set the
+raw frame id with `plugin_set_output_frame_id(outputIndex, frameId)`.
 
 For simple single-input / single-output methods, command mode also supports a
 raw shortcut:
@@ -607,6 +630,17 @@ For `spacedatastandards.org` schemas, the required FlatBuffer libraries and
 generated bindings must come from upstream SDS sources or published SDS
 artifacts generated with `flatc-wasm`. Do not add repo-local shadow `.fbs`
 families or hand-authored generated classes in this repo.
+
+PLG bindings are mirrored from SDS generated artifacts. During cross-repo schema
+work, point the generator at the active SDS checkout:
+
+```sh
+SPACE_DATA_STANDARDS_ROOT=/path/to/spacedatastandards.org \
+  node scripts/generate-plg-bindings.mjs
+```
+
+Without the override, the generator uses the installed `spacedatastandards.org`
+package and still refuses to read SDK-local schema copies.
 
 If another repo needs the same compiler runtime, the package also exposes a
 shared emception session at `space-data-module-sdk/compiler/emception` with

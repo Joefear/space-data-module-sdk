@@ -7,18 +7,16 @@
  * continue to work while the embedded manifest bytes switch to the
  * canonical spacedatastandards.org PLG schema.
  *
- * Lossy mappings:
+ * Compatibility mappings:
  *   - plugin_family → plugin_type (best-effort; families without a PLG
  *     counterpart fall back to `Analysis`).
- *   - methods[].input_ports/output_ports → EntryFunction.input_schemas /
- *     output_schema (first accepted type per port).
- *   - drain_policy, max_batch, port cardinalities, timers, protocols,
- *     invoke_surfaces, runtime_targets, build_artifacts are dropped;
- *     these are runtime-host concerns that live out-of-band under PLG.
- *   - schemas_used → required_schemas (type name only).
- *   - capabilities[] preserved; each entry becomes a
- *     PluginCapability {name, required}. (The "scope" on legacy entries is
- *     folded into the capability name as `kind#scope` if present.)
+ *   - methods[].input_ports/output_ports are preserved as PLG METHODS and
+ *     summarized into EntryFunction.input_schemas/output_schema for older
+ *     consumers.
+ *   - schemas_used are preserved as PLG SCHEMAS_USED and summarized into
+ *     required_schemas by type name.
+ *   - capabilities[] are preserved both as simple PluginCapability metadata
+ *     and as richer PLGHostCapability records for host/runtime gating.
  */
 
 import { CapabilityKind } from "../generated/orbpro/manifest/capability-kind.js";
@@ -140,6 +138,37 @@ function toPluginCapability(capability) {
   return { name, version, required };
 }
 
+function toHostCapability(capability) {
+  if (typeof capability === "string") {
+    return { capability, required: true };
+  }
+  if (!capability || typeof capability !== "object") {
+    return null;
+  }
+  const kind =
+    normalizeCapabilityName(capability.capability) ??
+    normalizeCapabilityName(capability.kind) ??
+    normalizeCapabilityName(capability.name);
+  if (!kind) {
+    return null;
+  }
+  const scope =
+    typeof capability.scope === "string" && capability.scope.trim().length > 0
+      ? capability.scope.trim()
+      : undefined;
+  const description =
+    typeof capability.description === "string" &&
+    capability.description.trim().length > 0
+      ? capability.description.trim()
+      : undefined;
+  return {
+    capability: kind,
+    ...(scope ? { scope } : {}),
+    required: capability.required !== false,
+    ...(description ? { description } : {}),
+  };
+}
+
 function toRequiredSchemas(schemasUsed) {
   if (!Array.isArray(schemasUsed)) {
     return [];
@@ -194,12 +223,17 @@ export function legacyManifestToPlg(input = {}) {
 
   const hasLegacyMethods = Array.isArray(input.methods);
   const hasPlgEntries = Array.isArray(input.entryFunctions);
+  const schemasUsed = Array.isArray(input.schemasUsed)
+    ? input.schemasUsed
+    : Array.isArray(input.schemas_used)
+      ? input.schemas_used
+      : [];
 
   const pluginType = hasLegacyMethods
     ? normalizePluginTypeFromFamily(input.pluginFamily ?? input.plugin_family)
-    : typeof input.pluginType === "string"
+    : typeof input.pluginType === "string" || typeof input.pluginType === "number"
       ? input.pluginType
-      : typeof input.plugin_type === "string"
+      : typeof input.plugin_type === "string" || typeof input.plugin_type === "number"
         ? input.plugin_type
         : normalizePluginTypeFromFamily(input.pluginFamily);
 
@@ -211,9 +245,11 @@ export function legacyManifestToPlg(input = {}) {
 
   const requiredSchemas = Array.isArray(input.requiredSchemas)
     ? input.requiredSchemas
+    : Array.isArray(input.required_schemas)
+      ? input.required_schemas
     : Array.from(
         new Set([
-          ...toRequiredSchemas(input.schemasUsed ?? input.schemas_used),
+          ...toRequiredSchemas(schemasUsed),
           ...collectEntrySchemas(entryFunctions),
         ]),
       );
@@ -221,6 +257,26 @@ export function legacyManifestToPlg(input = {}) {
   const capabilities = Array.isArray(input.capabilities)
     ? input.capabilities.map((cap) => toPluginCapability(cap)).filter(Boolean)
     : [];
+  const hostCapabilitySource = Array.isArray(input.hostCapabilities)
+    ? input.hostCapabilities
+    : Array.isArray(input.host_capabilities)
+      ? input.host_capabilities
+      : Array.isArray(input.capabilities)
+        ? input.capabilities
+        : [];
+  const hostCapabilities = hostCapabilitySource
+    .map((cap) => toHostCapability(cap))
+    .filter(Boolean);
+  const runtimeTargets = Array.isArray(input.runtimeTargets)
+    ? input.runtimeTargets
+    : Array.isArray(input.runtime_targets)
+      ? input.runtime_targets
+      : [];
+  const minPermissions = Array.isArray(input.minPermissions)
+    ? input.minPermissions
+    : Array.isArray(input.min_permissions)
+      ? input.min_permissions
+      : runtimeTargets;
 
   return {
     pluginId: input.pluginId ?? input.plugin_id ?? input.PLUGIN_ID,
@@ -244,9 +300,25 @@ export function legacyManifestToPlg(input = {}) {
     wasmSize: input.wasmSize ?? input.wasm_size,
     wasmCid: input.wasmCid ?? input.wasm_cid,
     entryFunctions,
+    methods: Array.isArray(input.methods) ? input.methods : [],
+    invokeSurfaces: Array.isArray(input.invokeSurfaces)
+      ? input.invokeSurfaces
+      : Array.isArray(input.invoke_surfaces)
+        ? input.invoke_surfaces
+        : [],
+    runtimeTargets,
     requiredSchemas,
+    schemasUsed,
     dependencies: Array.isArray(input.dependencies) ? input.dependencies : [],
     capabilities,
+    hostCapabilities,
+    timers: Array.isArray(input.timers) ? input.timers : [],
+    protocols: Array.isArray(input.protocols) ? input.protocols : [],
+    buildArtifacts: Array.isArray(input.buildArtifacts)
+      ? input.buildArtifacts
+      : Array.isArray(input.build_artifacts)
+        ? input.build_artifacts
+        : [],
     providerPeerId: input.providerPeerId ?? input.provider_peer_id,
     providerEpmCid: input.providerEpmCid ?? input.provider_epm_cid,
     encrypted: input.encrypted === true,
@@ -256,11 +328,7 @@ export function legacyManifestToPlg(input = {}) {
       ? input.allowedDomains
       : [],
     maxGrantTimeoutMs: input.maxGrantTimeoutMs ?? input.max_grant_timeout_ms,
-    minPermissions: Array.isArray(input.minPermissions)
-      ? input.minPermissions
-      : Array.isArray(input.runtimeTargets)
-        ? input.runtimeTargets
-        : [],
+    minPermissions,
     createdAt: input.createdAt ?? input.created_at,
     updatedAt: input.updatedAt ?? input.updated_at,
     documentationUrl: input.documentationUrl ?? input.documentation_url,

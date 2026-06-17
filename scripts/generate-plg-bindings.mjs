@@ -1,9 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-
-import { transform } from "esbuild";
-import { FlatcRunner } from "flatc-wasm";
 
 /**
  * Generate TS + JS bindings for the canonical spacedatastandards.org `PLG`
@@ -17,13 +15,15 @@ import { FlatcRunner } from "flatc-wasm";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 const packageRoot = path.resolve(__dirname, "..");
-const schemaPath = path.join(
-  packageRoot,
-  "schemas",
-  "spacedatastandards",
-  "PLG.fbs",
-);
+const sdsPackageRoot = process.env.SPACE_DATA_STANDARDS_ROOT
+  ? path.resolve(process.env.SPACE_DATA_STANDARDS_ROOT)
+  : path.dirname(require.resolve("spacedatastandards.org/package.json"));
+const sdsSchemaRoot = path.join(sdsPackageRoot, "schema");
+const schemaPath = path.join(sdsSchemaRoot, "PLG", "main.fbs");
+const jsBindingsRoot = path.join(sdsPackageRoot, "lib", "js", "PLG");
+const tsBindingsRoot = path.join(sdsPackageRoot, "lib", "ts", "PLG");
 const outputRoot = path.join(
   packageRoot,
   "src",
@@ -32,58 +32,17 @@ const outputRoot = path.join(
   "plg",
 );
 
-const VIRTUAL_ENTRY = "/schemas/plg-manifest.fbs";
-
-function addJsImportExtensions(code) {
-  return code.replace(
-    /((?:import|export)\s+[^'"]*?\sfrom\s+)(['"])(\.[^'"]*?)(\2)/g,
-    (match, prefix, quote, specifier, suffix) => {
-      if (/\.[cm]?js$/.test(specifier) || /\.json$/.test(specifier)) {
-        return match;
-      }
-      return `${prefix}${quote}${specifier}.js${suffix}`;
-    },
-  );
-}
-
 async function main() {
-  const fbs = await fs.readFile(schemaPath, "utf8");
-  const flatc = await FlatcRunner.init();
-  const generated = flatc.generateCode(
-    { entry: VIRTUAL_ENTRY, files: { [VIRTUAL_ENTRY]: fbs } },
-    "ts",
-  );
-
+  await fs.access(schemaPath);
+  await fs.access(jsBindingsRoot);
+  await fs.access(tsBindingsRoot);
   await fs.rm(outputRoot, { recursive: true, force: true });
   await fs.mkdir(outputRoot, { recursive: true });
-
-  for (const [relPath, tsSource] of Object.entries(generated)) {
-    if (!relPath.endsWith(".ts")) {
-      continue;
-    }
-    // The barrel file ends up named after the virtual entry (`plg-manifest.ts`).
-    // Rename it to `index.ts` so consumers can import from the directory.
-    const outputName =
-      relPath === "plg-manifest.ts" ? "index.ts" : relPath;
-    const tsPath = path.join(outputRoot, outputName);
-    const jsPath = tsPath.replace(/\.ts$/, ".js");
-    await fs.mkdir(path.dirname(tsPath), { recursive: true });
-    await fs.writeFile(tsPath, tsSource, "utf8");
-
-    const transformed = await transform(tsSource, {
-      loader: "ts",
-      format: "esm",
-      target: "es2020",
-    });
-    await fs.writeFile(
-      jsPath,
-      addJsImportExtensions(transformed.code),
-      "utf8",
-    );
-  }
+  await fs.cp(jsBindingsRoot, outputRoot, { recursive: true });
+  await fs.cp(tsBindingsRoot, outputRoot, { recursive: true });
 
   console.log(
-    `Generated PLG TS+JS bindings into ${path.relative(packageRoot, outputRoot)}`,
+    `Mirrored SDS PLG TS+JS bindings into ${path.relative(packageRoot, outputRoot)}`,
   );
 }
 

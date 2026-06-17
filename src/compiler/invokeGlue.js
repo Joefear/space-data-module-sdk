@@ -20,6 +20,24 @@ function uniqueOutputPorts(method) {
   return Array.isArray(method?.outputPorts) ? method.outputPorts : [];
 }
 
+function acceptedTypesForPort(port) {
+  const acceptedTypes = [];
+  for (const typeSet of Array.isArray(port?.acceptedTypeSets)
+    ? port.acceptedTypeSets
+    : []) {
+    for (const allowedType of Array.isArray(typeSet?.allowedTypes)
+      ? typeSet.allowedTypes
+      : []) {
+      acceptedTypes.push(allowedType ?? {});
+    }
+  }
+  return acceptedTypes;
+}
+
+function wireFormatLiteral(value) {
+  return String(value ?? "").toLowerCase() === "aligned-binary" ? "1u" : "0u";
+}
+
 export function resolveInvokeSurfaces(manifest = {}) {
   if (!Array.isArray(manifest.invokeSurfaces) || manifest.invokeSurfaces.length === 0) {
     return [InvokeSurface.DIRECT, InvokeSurface.COMMAND];
@@ -62,15 +80,22 @@ typedef struct plugin_input_frame_t {
   const char *file_identifier;
   uint32_t wire_format;
   const char *root_type_name;
+  /* Legacy TABF-only metadata. SDS PIV/TAB inputs set this to 0. */
   uint16_t fixed_string_length;
+  /* SDS PIV/TAB inputs expose the payload byte length here. */
   uint32_t byte_length;
   uint16_t required_alignment;
   uint16_t alignment;
   uint32_t size;
+  /* Legacy TABF-only metadata. SDS PIV/TAB inputs set this to 0. */
   uint32_t generation;
+  /* SDS PIV/TAB maps TAB.FRAME_ID here. */
   uint64_t trace_id;
+  /* Legacy TABF-only metadata. SDS PIV/TAB inputs set this to 0. */
   uint32_t stream_id;
+  /* SDS PIV/TAB decodes this from TAB.FRAME_ID as frame_id >> 1. */
   uint64_t sequence;
+  /* SDS PIV/TAB decodes this from TAB.FRAME_ID bit 0. */
   int32_t end_of_stream;
   const uint8_t *payload;
   uint32_t payload_length;
@@ -111,6 +136,12 @@ int32_t plugin_push_output_ex(
   const uint8_t *payload_ptr,
   uint32_t payload_length
 );
+int32_t plugin_set_output_frame_id(uint32_t output_index, uint64_t frame_id);
+int32_t plugin_set_output_stream_frame(
+  uint32_t output_index,
+  uint64_t sequence,
+  int32_t end_of_stream
+);
 
 void plugin_set_yielded(int32_t yielded);
 void plugin_set_backlog_remaining(uint32_t backlog_remaining);
@@ -132,17 +163,41 @@ uint32_t plugin_invoke_stream(
 `;
 }
 
+function renderAcceptedTypeArrays(method, ports, direction) {
+  return ports
+    .map((port, portIndex) => {
+      const acceptedTypes = acceptedTypesForPort(port);
+      if (acceptedTypes.length === 0) {
+        return "";
+      }
+      return `static const AcceptedTypeRef kMethod_${methodSymbol(method)}_${direction}_port_${portIndex}_accepted_types[] = {
+${acceptedTypes
+  .map(
+    (type) =>
+      `  { ${boolLiteral(type.acceptsAnyFlatbuffer === true)}, ${quoteCString(type.schemaName)}, ${quoteCString(type.fileIdentifier)}, ${wireFormatLiteral(type.wireFormat)}, ${boolLiteral(type.wireFormat !== undefined)}, ${quoteCString(type.rootTypeName)} },`,
+  )
+  .join("\n")}
+};
+`;
+    })
+    .join("");
+}
+
 function renderInputPortArrays(method) {
   const inputPorts = uniqueInputPorts(method);
   if (inputPorts.length === 0) {
     return "";
   }
-  return `static const PortRequirement kMethod_${methodSymbol(method)}_input_ports[] = {
+  return `${renderAcceptedTypeArrays(method, inputPorts, "input")}static const PortRequirement kMethod_${methodSymbol(method)}_input_ports[] = {
 ${inputPorts
-  .map(
-    (port) =>
-      `  { ${quoteCString(port.portId)}, ${boolLiteral(port.required !== false)} },`,
-  )
+  .map((port, portIndex) => {
+    const acceptedTypes = acceptedTypesForPort(port);
+    return `  { ${quoteCString(port.portId)}, ${boolLiteral(port.required !== false)}, ${
+      acceptedTypes.length > 0
+        ? `kMethod_${methodSymbol(method)}_input_port_${portIndex}_accepted_types`
+        : "nullptr"
+    }, ${acceptedTypes.length}u },`;
+  })
   .join("\n")}
 };
 `;
@@ -203,6 +258,7 @@ export function generateInvokeSupportSource({ manifest = {}, includeCommandMain 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -214,15 +270,27 @@ export function generateInvokeSupportSource({ manifest = {}, includeCommandMain 
 #include "PluginInvokeRequest_generated.h"
 #include "PluginInvokeResponse_generated.h"
 #include "TypedArenaBuffer_generated.h"
+#include "sds/PIV/main_generated.h"
 #include "space_data_module_invoke.h"
 
 ${renderMethodDeclarations(methods)}
 
 namespace {
 
+struct AcceptedTypeRef {
+  bool accepts_any_flatbuffer;
+  const char *schema_name;
+  const char *file_identifier;
+  uint32_t wire_format;
+  bool has_wire_format;
+  const char *root_type_name;
+};
+
 struct PortRequirement {
   const char *port_id;
   bool required;
+  const AcceptedTypeRef *accepted_types;
+  size_t accepted_type_count;
 };
 
 struct MethodDescriptor {
@@ -244,6 +312,8 @@ struct InputFrameOwned {
   std::string file_identifier{};
   std::string root_type_name{};
   std::vector<uint8_t> payload{};
+  const uint8_t *external_payload = nullptr;
+  uint32_t external_payload_length = 0;
 };
 
 struct OutputFrameOwned {
@@ -257,7 +327,8 @@ struct OutputFrameOwned {
   uint16_t required_alignment = 0;
   uint16_t alignment = 8;
   uint32_t generation = 0;
-  uint64_t trace_id = 0;
+  bool has_frame_id = false;
+  uint64_t frame_id = 0;
   uint32_t stream_id = 0;
   uint64_t sequence = 0;
   bool end_of_stream = false;
@@ -268,11 +339,17 @@ struct InvokeContext {
   const MethodDescriptor *method = nullptr;
   std::vector<InputFrameOwned> inputs{};
   std::vector<OutputFrameOwned> outputs{};
+  uint64_t trace_id = 0;
   uint32_t backlog_remaining = 0;
   bool yielded = false;
   int32_t status_code = 0;
   std::string error_code{};
   std::string error_message{};
+};
+
+struct AllocationRecord {
+  uint32_t ptr = 0;
+  uint32_t size = 0;
 };
 
 ${renderMethodTables(methods)}
@@ -281,6 +358,7 @@ ${renderMethodDescriptors(methods)}
 };
 
 static InvokeContext g_invoke_context;
+static std::vector<AllocationRecord> g_allocations{};
 
 static uintptr_t PtrFromU32(uint32_t value) {
   return static_cast<uintptr_t>(value);
@@ -298,6 +376,53 @@ static uint32_t *MutableU32Ptr(uint32_t value) {
   return reinterpret_cast<uint32_t *>(PtrFromU32(value));
 }
 
+static bool U32RangeExceeds(uint32_t offset, uint32_t size, uint32_t arena_size) {
+  return offset > arena_size || size > arena_size - offset;
+}
+
+static bool AllocationContains(uint32_t ptr, uint32_t length) {
+  if (length == 0u) {
+    return true;
+  }
+  if (ptr == 0u) {
+    return false;
+  }
+  for (const auto &allocation : g_allocations) {
+    if (ptr < allocation.ptr) {
+      continue;
+    }
+    const uint32_t offset = ptr - allocation.ptr;
+    if (!U32RangeExceeds(offset, length, allocation.size)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void TrackAllocation(uint32_t ptr, uint32_t size) {
+  if (ptr != 0u) {
+    g_allocations.push_back(AllocationRecord{ptr, size});
+  }
+}
+
+static bool UntrackAllocation(uint32_t ptr) {
+  if (ptr == 0u) {
+    return false;
+  }
+  const auto before = g_allocations.size();
+  g_allocations.erase(
+    std::remove_if(
+      g_allocations.begin(),
+      g_allocations.end(),
+      [ptr](const AllocationRecord &allocation) {
+        return allocation.ptr == ptr;
+      }
+    ),
+    g_allocations.end()
+  );
+  return g_allocations.size() != before;
+}
+
 static const MethodDescriptor *FindMethod(std::string_view method_id) {
   for (const auto &method : kMethodTable) {
     if (method_id == method.method_id) {
@@ -305,6 +430,55 @@ static const MethodDescriptor *FindMethod(std::string_view method_id) {
     }
   }
   return nullptr;
+}
+
+static bool CStringEmpty(const char *value) {
+  return !value || !value[0];
+}
+
+static bool CStringMatchesIfPresent(const char *expected, const std::string &actual) {
+  return CStringEmpty(expected) || actual == expected;
+}
+
+static const PortRequirement *FindInputPort(const MethodDescriptor *method, const std::string &port_id) {
+  if (!method) {
+    return nullptr;
+  }
+  for (size_t index = 0; index < method->input_port_count; index += 1) {
+    const auto &port = method->input_ports[index];
+    if (port.port_id && port_id == port.port_id) {
+      return &port;
+    }
+  }
+  return nullptr;
+}
+
+static bool InputTypeMatches(const AcceptedTypeRef &accepted, const InputFrameOwned &frame) {
+  if (accepted.accepts_any_flatbuffer) {
+    return true;
+  }
+  if (accepted.has_wire_format && frame.view.wire_format != accepted.wire_format) {
+    return false;
+  }
+  if (!accepted.has_wire_format &&
+      frame.view.wire_format != static_cast<uint32_t>(orbpro::stream::PayloadWireFormat_Flatbuffer)) {
+    return false;
+  }
+  return CStringMatchesIfPresent(accepted.schema_name, frame.schema_name) &&
+    CStringMatchesIfPresent(accepted.file_identifier, frame.file_identifier) &&
+    CStringMatchesIfPresent(accepted.root_type_name, frame.root_type_name);
+}
+
+static bool InputTypeAllowed(const PortRequirement &port, const InputFrameOwned &frame) {
+  if (port.accepted_type_count == 0u) {
+    return true;
+  }
+  for (size_t index = 0; index < port.accepted_type_count; index += 1) {
+    if (InputTypeMatches(port.accepted_types[index], frame)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static bool MethodDeclaresOutputPort(const MethodDescriptor *method, const char *port_id) {
@@ -341,7 +515,65 @@ static uint32_t AlignOffset(uint32_t offset, uint32_t alignment) {
   return remainder == 0u ? offset : offset + alignment - remainder;
 }
 
-static bool LoadInputsFromRequest(const orbpro::invoke::PluginInvokeRequestT &request) {
+static bool AlignOffsetChecked(size_t offset, uint32_t alignment, size_t *aligned_offset) {
+  if (!aligned_offset) {
+    return false;
+  }
+  if (alignment <= 1u) {
+    *aligned_offset = offset;
+    return true;
+  }
+  const size_t remainder = offset % static_cast<size_t>(alignment);
+  const size_t padding = remainder == 0u ? 0u : static_cast<size_t>(alignment) - remainder;
+  if (padding > std::numeric_limits<size_t>::max() - offset) {
+    return false;
+  }
+  *aligned_offset = offset + padding;
+  return true;
+}
+
+static std::string FlatBufferStringValue(const ::flatbuffers::String *value) {
+  return value ? std::string(value->c_str(), value->size()) : std::string();
+}
+
+static uint64_t DecodeSdsFrameSequence(uint64_t frame_id) {
+  return frame_id >> 1u;
+}
+
+static bool DecodeSdsFrameEndOfStream(uint64_t frame_id) {
+  return (frame_id & 1u) != 0u;
+}
+
+static uint64_t EncodeSdsFrameId(uint64_t sequence, bool end_of_stream) {
+  return (sequence << 1u) | (end_of_stream ? 1u : 0u);
+}
+
+static bool FrameRangeExceedsArena(
+  size_t payload_offset,
+  size_t payload_size,
+  size_t arena_size
+) {
+  return payload_offset > arena_size || payload_size > arena_size - payload_offset;
+}
+
+static void PopulateInputView(InputFrameOwned *owned) {
+  if (!owned) {
+    return;
+  }
+  owned->view.port_id = owned->port_id.empty() ? nullptr : owned->port_id.c_str();
+  owned->view.schema_name = owned->schema_name.empty() ? nullptr : owned->schema_name.c_str();
+  owned->view.file_identifier = owned->file_identifier.empty() ? nullptr : owned->file_identifier.c_str();
+  owned->view.root_type_name = owned->root_type_name.empty() ? nullptr : owned->root_type_name.c_str();
+  if (owned->external_payload && owned->external_payload_length > 0u) {
+    owned->view.payload = owned->external_payload;
+    owned->view.payload_length = owned->external_payload_length;
+  } else {
+    owned->view.payload = owned->payload.empty() ? nullptr : owned->payload.data();
+    owned->view.payload_length = static_cast<uint32_t>(owned->payload.size());
+  }
+}
+
+static bool LoadInputsFromLegacyRequest(const orbpro::invoke::PluginInvokeRequestT &request) {
   g_invoke_context.inputs.clear();
   g_invoke_context.inputs.reserve(request.input_frames.size());
 
@@ -353,7 +585,7 @@ static bool LoadInputsFromRequest(const orbpro::invoke::PluginInvokeRequestT &re
     const auto &frame = *frame_ptr;
     const auto payload_offset = static_cast<size_t>(frame.offset);
     const auto payload_size = static_cast<size_t>(frame.size);
-    if (payload_offset + payload_size > request.payload_arena.size()) {
+    if (FrameRangeExceedsArena(payload_offset, payload_size, request.payload_arena.size())) {
       SetError("invalid-request-frame", "Input frame payload range exceeds request payload arena.");
       return false;
     }
@@ -391,8 +623,83 @@ static bool LoadInputsFromRequest(const orbpro::invoke::PluginInvokeRequestT &re
     owned.view.stream_id = frame.stream_id;
     owned.view.sequence = frame.sequence;
     owned.view.end_of_stream = frame.end_of_stream ? 1 : 0;
-    owned.view.payload = owned.payload.empty() ? nullptr : owned.payload.data();
-    owned.view.payload_length = static_cast<uint32_t>(owned.payload.size());
+    PopulateInputView(&owned);
+  }
+
+  return true;
+}
+
+static bool LoadInputsFromPivRequest(const PIVRequest &request) {
+  g_invoke_context.inputs.clear();
+
+  const auto *input_frames = request.INPUTS();
+  const auto *payload_arena = request.PAYLOAD_ARENA();
+  const size_t input_count = input_frames ? input_frames->size() : 0u;
+  const size_t arena_size = payload_arena ? payload_arena->size() : 0u;
+  g_invoke_context.inputs.reserve(input_count);
+
+  for (size_t index = 0; index < input_count; index += 1) {
+    const auto *frame = input_frames->Get(static_cast<::flatbuffers::uoffset_t>(index));
+    if (!frame) {
+      continue;
+    }
+
+    const auto payload_offset = static_cast<size_t>(frame->OFFSET());
+    const auto payload_size = static_cast<size_t>(frame->SIZE());
+    if (payload_size > 0u && arena_size == 0u) {
+      if (
+        payload_offset > std::numeric_limits<uint32_t>::max() ||
+        payload_size > std::numeric_limits<uint32_t>::max() ||
+        !AllocationContains(
+          static_cast<uint32_t>(payload_offset),
+          static_cast<uint32_t>(payload_size)
+        )
+      ) {
+        SetError(
+          "invalid-request-pointer",
+          "SDS PIV external arena TAB payload range is not owned by the module SDK allocator."
+        );
+        return false;
+      }
+    } else if (FrameRangeExceedsArena(payload_offset, payload_size, arena_size)) {
+      SetError("invalid-request-frame", "Input frame payload range exceeds request payload arena.");
+      return false;
+    }
+
+    g_invoke_context.inputs.emplace_back();
+    auto &owned = g_invoke_context.inputs.back();
+    owned = InputFrameOwned{};
+    owned.port_id = FlatBufferStringValue(frame->PORT_ID());
+    if (const auto *type_ref = frame->TYPE_REF()) {
+      owned.schema_name = FlatBufferStringValue(type_ref->SCHEMA_NAME());
+      owned.file_identifier = FlatBufferStringValue(type_ref->FILE_IDENTIFIER());
+      owned.root_type_name = FlatBufferStringValue(type_ref->ROOT_TYPE());
+    }
+    if (payload_size > 0u && arena_size == 0u) {
+      owned.external_payload = ConstPtr(static_cast<uint32_t>(payload_offset));
+      owned.external_payload_length = static_cast<uint32_t>(payload_size);
+    } else if (payload_size > 0u && payload_arena) {
+      const auto *arena_data = payload_arena->data();
+      owned.payload.insert(
+        owned.payload.end(),
+        arena_data + static_cast<std::ptrdiff_t>(payload_offset),
+        arena_data + static_cast<std::ptrdiff_t>(payload_offset + payload_size)
+      );
+    }
+
+    owned.view.wire_format = static_cast<uint32_t>(frame->WIRE_FORMAT());
+    owned.view.fixed_string_length = 0;
+    owned.view.byte_length = static_cast<uint32_t>(payload_size);
+    owned.view.required_alignment = static_cast<uint16_t>(frame->ALIGNMENT());
+    owned.view.alignment = static_cast<uint16_t>(frame->ALIGNMENT());
+    owned.view.size = frame->SIZE();
+    owned.view.generation = 0;
+    const auto frame_id = frame->FRAME_ID();
+    owned.view.trace_id = frame_id;
+    owned.view.stream_id = 0;
+    owned.view.sequence = DecodeSdsFrameSequence(frame_id);
+    owned.view.end_of_stream = DecodeSdsFrameEndOfStream(frame_id) ? 1 : 0;
+    PopulateInputView(&owned);
   }
 
   return true;
@@ -425,61 +732,153 @@ static bool ValidateRequiredInputs(const MethodDescriptor *method) {
   return true;
 }
 
-static orbpro::invoke::PluginInvokeResponseT BuildResponseObject() {
-  orbpro::invoke::PluginInvokeResponseT response{};
-  response.status_code = g_invoke_context.status_code;
-  response.yielded = g_invoke_context.yielded;
-  response.backlog_remaining = g_invoke_context.backlog_remaining;
-  response.error_code = g_invoke_context.error_code;
-  response.error_message = g_invoke_context.error_message;
+static bool ValidateInputFrames(const MethodDescriptor *method) {
+  if (!method) {
+    return false;
+  }
+  for (const auto &frame : g_invoke_context.inputs) {
+    const auto *port = FindInputPort(method, frame.port_id);
+    if (!port) {
+      SetError(
+        "unknown-input-port",
+        std::string("Input frame uses undeclared port: ") + frame.port_id
+      );
+      return false;
+    }
+    if (!InputTypeAllowed(*port, frame)) {
+      SetError(
+        "unsupported-input-type",
+        std::string("Input frame type is not accepted by port: ") + frame.port_id
+      );
+      return false;
+    }
+  }
+  return ValidateRequiredInputs(method);
+}
 
-  uint32_t arena_offset = 0;
-  for (const auto &output : g_invoke_context.outputs) {
+static pivStatus ResolvePivStatus(
+  int32_t status_code,
+  bool yielded,
+  const std::string &error_code
+) {
+  if (yielded) {
+    return pivStatus_YIELDED;
+  }
+  if (status_code == 404) {
+    return pivStatus_NOT_FOUND;
+  }
+  if (status_code != 0 || !error_code.empty()) {
+    return pivStatus_FAILED;
+  }
+  return pivStatus_OK;
+}
+
+static std::vector<uint8_t> SerializePivResponse(
+  int32_t status_code,
+  bool yielded,
+  uint32_t backlog_remaining,
+  const std::vector<OutputFrameOwned> &outputs,
+  const std::string &error_code,
+  const std::string &error_message,
+  uint64_t trace_id = 0
+) {
+  struct PackedOutputFrame {
+    const OutputFrameOwned *output = nullptr;
+    uint32_t offset = 0;
+    uint32_t size = 0;
+    uint32_t alignment = 1;
+  };
+
+  std::vector<uint8_t> payload_arena{};
+  std::vector<PackedOutputFrame> packed_outputs{};
+  size_t arena_offset = 0;
+  for (const auto &output : outputs) {
     const uint32_t alignment = std::max<uint32_t>(
       1u,
       output.required_alignment > 0 ? output.required_alignment : output.alignment
     );
-    const uint32_t aligned_offset = AlignOffset(arena_offset, alignment);
-    response.payload_arena.resize(aligned_offset, 0);
-    response.payload_arena.insert(
-      response.payload_arena.end(),
+    size_t aligned_offset = 0;
+    if (
+      !AlignOffsetChecked(arena_offset, alignment, &aligned_offset) ||
+      aligned_offset > std::numeric_limits<uint32_t>::max() ||
+      output.payload.size() >
+        static_cast<size_t>(std::numeric_limits<uint32_t>::max()) - aligned_offset
+    ) {
+      return SerializePivResponse(
+        500,
+        false,
+        0,
+        {},
+        "output-arena-overflow",
+        "Output payload arena exceeds the 32-bit SDS TAB offset range.",
+        trace_id
+      );
+    }
+    payload_arena.resize(aligned_offset, 0);
+    payload_arena.insert(
+      payload_arena.end(),
       output.payload.begin(),
       output.payload.end()
     );
-    arena_offset = aligned_offset + static_cast<uint32_t>(output.payload.size());
-
-    auto type_ref = std::make_unique<orbpro::stream::FlatBufferTypeRefT>();
-    type_ref->schema_name = output.schema_name;
-    type_ref->file_identifier = output.file_identifier;
-    type_ref->wire_format =
-      static_cast<orbpro::stream::PayloadWireFormat>(output.wire_format);
-    type_ref->root_type_name = output.root_type_name;
-    type_ref->fixed_string_length = output.fixed_string_length;
-    type_ref->byte_length =
-      output.byte_length > 0 ? output.byte_length : static_cast<uint32_t>(output.payload.size());
-    type_ref->required_alignment = output.required_alignment;
-
-    auto frame = std::make_unique<orbpro::stream::TypedArenaBufferT>();
-    frame->type_ref = std::move(type_ref);
-    frame->port_id = output.port_id;
-    frame->alignment = static_cast<uint16_t>(alignment);
-    frame->offset = aligned_offset;
-    frame->size = static_cast<uint32_t>(output.payload.size());
-    frame->generation = output.generation;
-    frame->trace_id = output.trace_id;
-    frame->stream_id = output.stream_id;
-    frame->sequence = output.sequence;
-    frame->end_of_stream = output.end_of_stream;
-    response.output_frames.emplace_back(std::move(frame));
+    arena_offset = aligned_offset + output.payload.size();
+    packed_outputs.push_back(PackedOutputFrame{
+      &output,
+      static_cast<uint32_t>(aligned_offset),
+      static_cast<uint32_t>(output.payload.size()),
+      alignment,
+    });
   }
 
-  return response;
-}
-
-static std::vector<uint8_t> SerializeResponse(const orbpro::invoke::PluginInvokeResponseT &response) {
   ::flatbuffers::FlatBufferBuilder builder(1024);
-  const auto root = orbpro::invoke::CreatePluginInvokeResponse(builder, &response);
-  orbpro::invoke::FinishPluginInvokeResponseBuffer(builder, root);
+  std::vector<::flatbuffers::Offset<TAB>> output_frames{};
+  output_frames.reserve(packed_outputs.size());
+  for (const auto &packed : packed_outputs) {
+    const auto *output = packed.output;
+    const auto type_ref = CreateFlatBufferTypeRefDirect(
+      builder,
+      output && !output->schema_name.empty() ? output->schema_name.c_str() : nullptr,
+      output && !output->file_identifier.empty() ? output->file_identifier.c_str() : nullptr,
+      nullptr,
+      output && !output->root_type_name.empty() ? output->root_type_name.c_str() : nullptr
+    );
+    const auto wire_format =
+      output && output->wire_format == static_cast<uint32_t>(payloadWireFormat_ALIGNED_BINARY)
+        ? payloadWireFormat_ALIGNED_BINARY
+        : payloadWireFormat_FLATBUFFER;
+    output_frames.push_back(CreateTABDirect(
+      builder,
+      packed.offset,
+      packed.size,
+      packed.alignment,
+      wire_format,
+      type_ref,
+      bufferMutability_IMMUTABLE,
+      bufferOwnership_HOST_OWNED,
+      output && output->has_frame_id ? output->frame_id : 0,
+      output && !output->port_id.empty() ? output->port_id.c_str() : nullptr
+    ));
+  }
+
+  const auto output_vector = builder.CreateVector(output_frames);
+  const auto arena_vector = builder.CreateVector(payload_arena);
+  const auto error_code_offset =
+    error_code.empty() ? 0 : builder.CreateString(error_code);
+  const auto error_message_offset =
+    error_message.empty() ? 0 : builder.CreateString(error_message);
+  const auto response = CreatePIVResponse(
+    builder,
+    status_code,
+    ResolvePivStatus(status_code, yielded, error_code),
+    yielded,
+    backlog_remaining,
+    output_vector,
+    arena_vector,
+    error_code_offset,
+    error_message_offset,
+    trace_id
+  );
+  const auto root = CreatePIV(builder, 0, response);
+  FinishPIVBuffer(builder, root);
   return std::vector<uint8_t>(
     builder.GetBufferPointer(),
     builder.GetBufferPointer() + builder.GetSize()
@@ -489,16 +888,52 @@ static std::vector<uint8_t> SerializeResponse(const orbpro::invoke::PluginInvoke
 static std::vector<uint8_t> SerializeErrorResponse(
   int32_t status_code,
   const char *error_code,
-  const std::string &error_message
+  const std::string &error_message,
+  uint64_t trace_id = 0
 ) {
-  orbpro::invoke::PluginInvokeResponseT response{};
-  response.status_code = status_code;
-  response.error_code = error_code ? error_code : "invoke-error";
-  response.error_message = error_message;
-  return SerializeResponse(response);
+  return SerializePivResponse(
+    status_code,
+    false,
+    0,
+    {},
+    error_code ? error_code : "invoke-error",
+    error_message,
+    trace_id
+  );
 }
 
-static std::vector<uint8_t> DispatchRequestObject(
+static std::vector<uint8_t> SerializeContextResponse() {
+  return SerializePivResponse(
+    g_invoke_context.status_code,
+    g_invoke_context.yielded,
+    g_invoke_context.backlog_remaining,
+    g_invoke_context.outputs,
+    g_invoke_context.error_code,
+    g_invoke_context.error_message,
+    g_invoke_context.trace_id
+  );
+}
+
+static std::vector<uint8_t> DispatchLoadedContext(
+  const MethodDescriptor *method,
+  bool inputs_loaded,
+  bool *runtime_error
+) {
+  if (!inputs_loaded || !ValidateInputFrames(method)) {
+    if (runtime_error) {
+      *runtime_error = true;
+    }
+    if (g_invoke_context.status_code == 0) {
+      g_invoke_context.status_code = 400;
+    }
+    return SerializeContextResponse();
+  }
+
+  g_invoke_context.status_code = method->handler ? method->handler() : -1;
+  return SerializeContextResponse();
+}
+
+static std::vector<uint8_t> DispatchLegacyRequestObject(
   const orbpro::invoke::PluginInvokeRequestT &request,
   bool *runtime_error
 ) {
@@ -515,18 +950,40 @@ static std::vector<uint8_t> DispatchRequestObject(
   }
 
   ResetInvokeContext(method);
-  if (!LoadInputsFromRequest(request) || !ValidateRequiredInputs(method)) {
+  g_invoke_context.trace_id = 0;
+  return DispatchLoadedContext(
+    method,
+    LoadInputsFromLegacyRequest(request),
+    runtime_error
+  );
+}
+
+static std::vector<uint8_t> DispatchPivRequestObject(
+  const PIVRequest &request,
+  bool *runtime_error
+) {
+  const auto method_id = FlatBufferStringValue(request.METHOD_ID());
+  const auto trace_id = request.TRACE_ID();
+  const auto *method = FindMethod(method_id);
+  if (!method) {
     if (runtime_error) {
       *runtime_error = true;
     }
-    if (g_invoke_context.status_code == 0) {
-      g_invoke_context.status_code = 400;
-    }
-    return SerializeResponse(BuildResponseObject());
+    return SerializeErrorResponse(
+      404,
+      "unknown-method",
+      std::string("Unknown method: ") + method_id,
+      trace_id
+    );
   }
 
-  g_invoke_context.status_code = method->handler ? method->handler() : -1;
-  return SerializeResponse(BuildResponseObject());
+  ResetInvokeContext(method);
+  g_invoke_context.trace_id = trace_id;
+  return DispatchLoadedContext(
+    method,
+    LoadInputsFromPivRequest(request),
+    runtime_error
+  );
 }
 
 static std::vector<uint8_t> DispatchRequestBytes(
@@ -541,6 +998,25 @@ static std::vector<uint8_t> DispatchRequestBytes(
     return SerializeErrorResponse(400, "invalid-request", "Invoke request bytes are empty.");
   }
 
+  if (request_len >= 8u && PIVBufferHasIdentifier(request_bytes)) {
+    ::flatbuffers::Verifier verifier(request_bytes, request_len);
+    if (!VerifyPIVBuffer(verifier)) {
+      if (runtime_error) {
+        *runtime_error = true;
+      }
+      return SerializeErrorResponse(400, "invalid-request", "SDS PIV invoke envelope verification failed.");
+    }
+    const auto *envelope = GetPIV(request_bytes);
+    const auto *request = envelope ? envelope->REQUEST() : nullptr;
+    if (!request) {
+      if (runtime_error) {
+        *runtime_error = true;
+      }
+      return SerializeErrorResponse(400, "invalid-request", "SDS PIV invoke envelope does not contain a request.");
+    }
+    return DispatchPivRequestObject(*request, runtime_error);
+  }
+
   ::flatbuffers::Verifier verifier(request_bytes, request_len);
   if (!orbpro::invoke::VerifyPluginInvokeRequestBuffer(verifier)) {
     if (runtime_error) {
@@ -551,7 +1027,7 @@ static std::vector<uint8_t> DispatchRequestBytes(
 
   const auto *request = orbpro::invoke::GetPluginInvokeRequest(request_bytes);
   auto request_object = std::unique_ptr<orbpro::invoke::PluginInvokeRequestT>(request->UnPack());
-  return DispatchRequestObject(*request_object, runtime_error);
+  return DispatchLegacyRequestObject(*request_object, runtime_error);
 }
 
 static bool ReadAllStdin(std::vector<uint8_t> *bytes_out) {
@@ -687,6 +1163,10 @@ extern "C" int32_t plugin_push_output_typed(
     );
     return -1;
   }
+  if (!payload_ptr && payload_length > 0u) {
+    SetError("invalid-output-payload", "Output payload pointer is null but payload length is non-zero.");
+    return -1;
+  }
 
   OutputFrameOwned frame{};
   frame.port_id = ReadCString(port_id);
@@ -731,6 +1211,30 @@ extern "C" int32_t plugin_push_output_ex(
   );
 }
 
+extern "C" int32_t plugin_set_output_frame_id(uint32_t output_index, uint64_t frame_id) {
+  if (output_index >= g_invoke_context.outputs.size()) {
+    SetError("invalid-output-frame", "Output frame index is out of range.");
+    return -1;
+  }
+  auto &frame = g_invoke_context.outputs[output_index];
+  frame.has_frame_id = true;
+  frame.frame_id = frame_id;
+  frame.sequence = DecodeSdsFrameSequence(frame_id);
+  frame.end_of_stream = DecodeSdsFrameEndOfStream(frame_id);
+  return 0;
+}
+
+extern "C" int32_t plugin_set_output_stream_frame(
+  uint32_t output_index,
+  uint64_t sequence,
+  int32_t end_of_stream
+) {
+  return plugin_set_output_frame_id(
+    output_index,
+    EncodeSdsFrameId(sequence, end_of_stream != 0)
+  );
+}
+
 extern "C" void plugin_set_yielded(int32_t yielded) {
   g_invoke_context.yielded = yielded != 0;
 }
@@ -747,12 +1251,14 @@ extern "C" void plugin_set_error(const char *error_code, const char *error_messa
 extern "C" uint32_t plugin_alloc(uint32_t size) {
   const auto allocation_size = size > 0u ? size : 1u;
   void *ptr = std::malloc(allocation_size);
-  return ptr ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr)) : 0u;
+  const uint32_t result = ptr ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr)) : 0u;
+  TrackAllocation(result, allocation_size);
+  return result;
 }
 
 extern "C" void plugin_free(uint32_t ptr, uint32_t size) {
   (void)size;
-  if (ptr != 0u) {
+  if (ptr != 0u && UntrackAllocation(ptr)) {
     std::free(reinterpret_cast<void *>(PtrFromU32(ptr)));
   }
 }
@@ -762,16 +1268,34 @@ extern "C" uint32_t plugin_invoke_stream(
   uint32_t request_len,
   uint32_t response_len_out_ptr
 ) {
+  if (response_len_out_ptr != 0u && !AllocationContains(response_len_out_ptr, 4u)) {
+    return 0u;
+  }
   if (response_len_out_ptr != 0u) {
     *MutableU32Ptr(response_len_out_ptr) = 0u;
   }
 
   bool runtime_error = false;
-  const auto response_bytes = DispatchRequestBytes(
-    ConstPtr(request_ptr),
-    static_cast<size_t>(request_len),
-    &runtime_error
-  );
+  const auto response_bytes =
+    request_len > 0u && !AllocationContains(request_ptr, request_len)
+      ? SerializePivResponse(
+          400,
+          false,
+          0,
+          {},
+          "invalid-request-pointer",
+          "Direct invoke request pointer range is not owned by the module SDK allocator.",
+          0
+        )
+      : DispatchRequestBytes(
+          ConstPtr(request_ptr),
+          static_cast<size_t>(request_len),
+          &runtime_error
+        );
+
+  if (response_bytes.size() > std::numeric_limits<uint32_t>::max()) {
+    return 0u;
+  }
 
   const uint32_t response_ptr = plugin_alloc(static_cast<uint32_t>(response_bytes.size()));
   if (response_ptr == 0u) {
@@ -823,44 +1347,53 @@ ${includeCommandMain
     if (!BuildRawShortcutRequest(method, stdin_bytes, &shortcut_request)) {
       std::fprintf(stderr, "Failed to construct raw shortcut request.\\n");
       return 64;
-    }
+	    }
 
-    bool runtime_error = false;
-    const auto response_bytes = DispatchRequestObject(shortcut_request, &runtime_error);
-    ::flatbuffers::Verifier verifier(response_bytes.data(), response_bytes.size());
-    if (!orbpro::invoke::VerifyPluginInvokeResponseBuffer(verifier)) {
-      std::fprintf(stderr, "Shortcut response verification failed.\\n");
-      return 70;
-    }
+	    bool runtime_error = false;
+	    const auto response_bytes = DispatchLegacyRequestObject(shortcut_request, &runtime_error);
+	    ::flatbuffers::Verifier verifier(response_bytes.data(), response_bytes.size());
+	    if (!VerifyPIVBuffer(verifier)) {
+	      std::fprintf(stderr, "Shortcut response verification failed.\\n");
+	      return 70;
+	    }
 
-    auto response = std::unique_ptr<orbpro::invoke::PluginInvokeResponseT>(
-      orbpro::invoke::GetPluginInvokeResponse(response_bytes.data())->UnPack()
-    );
-    if (runtime_error || response->status_code != 0 || !response->error_code.empty()) {
-      if (!response->error_message.empty()) {
-        std::fprintf(stderr, "%s\\n", response->error_message.c_str());
-      }
-      return 1;
-    }
-    if (response->output_frames.size() > 1u) {
-      std::fprintf(stderr, "Raw shortcut mode produced more than one output frame.\\n");
-      return 65;
-    }
-    if (response->output_frames.empty()) {
-      return 0;
-    }
+	    const auto *response_envelope = GetPIV(response_bytes.data());
+	    const auto *response = response_envelope ? response_envelope->RESPONSE() : nullptr;
+	    if (!response) {
+	      std::fprintf(stderr, "Shortcut response missing PIV response body.\\n");
+	      return 70;
+	    }
+	    const auto error_code = FlatBufferStringValue(response->ERROR_CODE());
+	    const auto error_message = FlatBufferStringValue(response->ERROR_MESSAGE());
+	    if (runtime_error || response->STATUS_CODE() != 0 || !error_code.empty()) {
+	      if (!error_message.empty()) {
+	        std::fprintf(stderr, "%s\\n", error_message.c_str());
+	      }
+	      return 1;
+	    }
+	    const auto *output_frames = response->OUTPUTS();
+	    const auto output_count = output_frames ? output_frames->size() : 0u;
+	    if (output_count > 1u) {
+	      std::fprintf(stderr, "Raw shortcut mode produced more than one output frame.\\n");
+	      return 65;
+	    }
+	    if (output_count == 0u) {
+	      return 0;
+	    }
 
-    const auto &frame = *response->output_frames[0];
-    const auto payload_offset = static_cast<size_t>(frame.offset);
-    const auto payload_size = static_cast<size_t>(frame.size);
-    if (payload_offset + payload_size > response->payload_arena.size()) {
-      std::fprintf(stderr, "Raw shortcut output frame exceeds response payload arena.\\n");
-      return 70;
-    }
-    if (!WriteAllStdout(response->payload_arena.data() + payload_offset, payload_size)) {
-      std::fprintf(stderr, "Failed to write stdout.\\n");
-      return 74;
-    }
+	    const auto *frame = output_frames->Get(0);
+	    const auto *payload_arena = response->PAYLOAD_ARENA();
+	    const auto payload_offset = static_cast<size_t>(frame ? frame->OFFSET() : 0u);
+	    const auto payload_size = static_cast<size_t>(frame ? frame->SIZE() : 0u);
+	    const auto arena_size = payload_arena ? payload_arena->size() : 0u;
+	    if (!frame || !payload_arena || FrameRangeExceedsArena(payload_offset, payload_size, arena_size)) {
+	      std::fprintf(stderr, "Raw shortcut output frame exceeds response payload arena.\\n");
+	      return 70;
+	    }
+	    if (!WriteAllStdout(payload_arena->data() + payload_offset, payload_size)) {
+	      std::fprintf(stderr, "Failed to write stdout.\\n");
+	      return 74;
+	    }
     return 0;
   }
 

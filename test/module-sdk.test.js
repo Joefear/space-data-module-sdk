@@ -14,6 +14,7 @@ import {
   encodePlgManifest,
   encodePluginManifest,
   generateEmbeddedManifestSource,
+  isPlgManifestBuffer,
   legacyManifestToPlg,
   loadKnownTypeCatalog,
   loadStandardsCatalog,
@@ -147,11 +148,151 @@ test("plugin manifest decoder accepts canonical PLG artifact buffers", () => {
   assert.equal(decoded.version, manifest.version);
   assert.equal(decoded.methods[0].methodId, "propagate");
   assert.deepEqual(decoded.methods[0].inputPorts[0].acceptedTypeSets[0].allowedTypes, [
-    { schemaName: "OMM.fbs" },
+    {
+      schemaName: "OMM.fbs",
+      fileIdentifier: "$OMM",
+      schemaVersion: undefined,
+      rootTypeName: undefined,
+      wireFormat: "flatbuffer",
+    },
   ]);
   assert.deepEqual(decoded.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes, [
-    { schemaName: "CAT.fbs" },
+    {
+      schemaName: "CAT.fbs",
+      fileIdentifier: "$CAT",
+      schemaVersion: undefined,
+      rootTypeName: undefined,
+      wireFormat: "flatbuffer",
+    },
   ]);
+});
+
+test("plugin manifest encoder emits canonical PLG with rich invoke metadata", () => {
+  const manifest = {
+    ...createTestManifest(),
+    capabilities: [
+      "clock",
+      {
+        capability: "protocol_handle",
+        scope: "sgp4",
+        required: false,
+        description: "Serve SGP4 stream requests.",
+      },
+    ],
+    invokeSurfaces: ["direct", "command"],
+    runtimeTargets: ["browser", "wasmedge"],
+    timers: [
+      {
+        timerId: "refresh",
+        methodId: "propagate",
+        inputPortId: "request",
+        defaultIntervalMs: 60000n,
+        description: "Refresh propagated states.",
+      },
+    ],
+    protocols: [createHostedProtocol()],
+    buildArtifacts: [
+      {
+        artifactId: "isomorphic-wasm",
+        kind: "wasm",
+        path: "dist/isomorphic/module.wasm",
+        target: "browser+wasmedge",
+        entrySymbol: "plugin_invoke_stream",
+      },
+    ],
+    schemasUsed: [
+      {
+        schemaName: "OMM.fbs",
+        fileIdentifier: "$OMM",
+        rootTypeName: "OMM",
+      },
+      createAlignedType({
+        schemaName: "StateVector.fbs",
+        fileIdentifier: "STVC",
+        rootTypeName: "StateVector",
+      }),
+    ],
+    methods: [
+      {
+        ...createTestManifest().methods[0],
+        inputPorts: [
+          {
+            portId: "request",
+            displayName: "Request",
+            acceptedTypeSets: [
+              {
+                setId: "omm",
+                description: "Canonical OMM input.",
+                allowedTypes: [
+                  {
+                    schemaName: "OMM.fbs",
+                    fileIdentifier: "$OMM",
+                    rootTypeName: "OMM",
+                  },
+                ],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 2,
+            required: true,
+            description: "Propagation request stream.",
+          },
+        ],
+        outputPorts: [
+          {
+            portId: "state",
+            displayName: "State",
+            acceptedTypeSets: [
+              {
+                setId: "state-vector",
+                description: "FlatBuffer fallback plus aligned state vector.",
+                allowedTypes: [
+                  createFlatbufferType({ rootTypeName: "StateVector" }),
+                  createAlignedType({ rootTypeName: "StateVector" }),
+                ],
+              },
+            ],
+            minStreams: 0,
+            maxStreams: 1,
+            required: false,
+            description: "Propagated states.",
+          },
+        ],
+        maxBatch: 64,
+        drainPolicy: "drain-until-yield",
+        description: "Propagate one batch of requests.",
+      },
+    ],
+  };
+
+  const encoded = encodePluginManifest(manifest);
+  assert.equal(isPlgManifestBuffer(encoded), true);
+
+  const decodedPlg = decodePlgManifest(encoded);
+  assert.deepEqual(decodedPlg.invokeSurfaces, ["direct", "command"]);
+  assert.deepEqual(decodedPlg.runtimeTargets, ["browser", "wasmedge"]);
+  assert.equal(decodedPlg.methods[0].methodId, "propagate");
+  assert.equal(decodedPlg.methods[0].maxBatch, 64);
+  assert.equal(decodedPlg.methods[0].drainPolicy, "drain-until-yield");
+  assert.equal(decodedPlg.methods[0].inputPorts[0].portId, "request");
+  assert.equal(decodedPlg.methods[0].inputPorts[0].maxStreams, 2);
+  assert.equal(
+    decodedPlg.methods[0].outputPorts[0].acceptedTypeSets[0].allowedTypes[1]
+      .wireFormat,
+    "aligned-binary",
+  );
+  assert.equal(decodedPlg.hostCapabilities[0].capability, "clock");
+  assert.equal(decodedPlg.hostCapabilities[1].capability, "protocol_handle");
+  assert.equal(decodedPlg.hostCapabilities[1].scope, "sgp4");
+  assert.equal(decodedPlg.timers[0].defaultIntervalMs, 60000n);
+  assert.equal(decodedPlg.protocols[0].wireId, "/sdn/sgp4/1.0.0");
+  assert.equal(decodedPlg.buildArtifacts[0].path, "dist/isomorphic/module.wasm");
+  assert.equal(decodedPlg.schemasUsed[1].wireFormat, "aligned-binary");
+
+  const decoded = decodePluginManifest(encoded);
+  assert.deepEqual(decoded.methods, decodedPlg.methods);
+  assert.deepEqual(decoded.protocols, decodedPlg.protocols);
+  assert.deepEqual(decoded.buildArtifacts, decodedPlg.buildArtifacts);
 });
 
 test("plugin manifest invoke surfaces round-trip through FlatBuffer encoding", () => {

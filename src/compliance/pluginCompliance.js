@@ -21,6 +21,12 @@ import {
   decodePlgManifest,
   isPlgManifestBuffer,
 } from "../manifest/plgCodec.js";
+import { SDS_MANIFEST_SECTION_NAME } from "../bundle/constants.js";
+import {
+  decodeUnsignedLeb128,
+  getWasmCustomSections,
+  parseWasmModuleSections,
+} from "../bundle/wasm.js";
 
 const RecommendedCapabilitySet = new Set(RecommendedCapabilityIds);
 const StandaloneWasiCapabilitySet = new Set(StandaloneWasiCapabilityIds);
@@ -1385,6 +1391,222 @@ function indexOfBytes(haystack, needle, startIndex = 0) {
   return -1;
 }
 
+function isPlausibleEmbeddedManifestString(value, maxLength = 512) {
+  return (
+    isNonEmptyString(value) &&
+    value.length <= maxLength &&
+    /^[\x20-\x7e]+$/.test(value)
+  );
+}
+
+function readI32ConstExpression(bytes, offset, end) {
+  let cursor = offset;
+  const opcode = bytes[cursor++];
+  if (opcode !== 0x41) {
+    return null;
+  }
+  const valueInfo = decodeUnsignedLeb128(bytes, cursor);
+  cursor = valueInfo.nextOffset;
+  if (cursor >= end || bytes[cursor] !== 0x0b) {
+    return null;
+  }
+  return { value: valueInfo.value, nextOffset: cursor + 1 };
+}
+
+function extractWasmDataSegments(wasmBytes) {
+  let parsed;
+  try {
+    parsed = parseWasmModuleSections(wasmBytes);
+  } catch {
+    return [];
+  }
+  const segments = [];
+  for (const section of parsed.sections) {
+    if (section.id !== 11) {
+      continue;
+    }
+    const payload = parsed.bytes.subarray(section.payloadStart, section.payloadEnd);
+    let cursor = 0;
+    let countInfo;
+    try {
+      countInfo = decodeUnsignedLeb128(payload, cursor);
+    } catch {
+      continue;
+    }
+    cursor = countInfo.nextOffset;
+    for (let index = 0; index < countInfo.value && cursor < payload.length; index += 1) {
+      const flagsInfo = decodeUnsignedLeb128(payload, cursor);
+      const flags = flagsInfo.value;
+      cursor = flagsInfo.nextOffset;
+      let memoryOffset = null;
+      if (flags === 0) {
+        const expression = readI32ConstExpression(payload, cursor, payload.length);
+        if (!expression) {
+          break;
+        }
+        memoryOffset = expression.value;
+        cursor = expression.nextOffset;
+      } else if (flags === 2) {
+        const memoryIndexInfo = decodeUnsignedLeb128(payload, cursor);
+        cursor = memoryIndexInfo.nextOffset;
+        const expression = readI32ConstExpression(payload, cursor, payload.length);
+        if (!expression) {
+          break;
+        }
+        memoryOffset = expression.value;
+        cursor = expression.nextOffset;
+      }
+      const sizeInfo = decodeUnsignedLeb128(payload, cursor);
+      cursor = sizeInfo.nextOffset;
+      const dataStart = cursor;
+      const dataEnd = dataStart + sizeInfo.value;
+      if (dataEnd > payload.length) {
+        break;
+      }
+      segments.push({
+        memoryOffset,
+        bytes: payload.subarray(dataStart, dataEnd),
+      });
+      cursor = dataEnd;
+    }
+  }
+  return segments;
+}
+
+function concatenateWasmDataSegmentPayloads(wasmBytes) {
+  const segments = extractWasmDataSegments(wasmBytes);
+  if (segments.length === 0) {
+    return null;
+  }
+  const totalLength = segments.reduce(
+    (total, segment) => total + segment.bytes.length,
+    0,
+  );
+  if (totalLength <= 0) {
+    return null;
+  }
+  const out = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const segment of segments) {
+    out.set(segment.bytes, offset);
+    offset += segment.bytes.length;
+  }
+  return out;
+}
+
+function reconstructWasmDataMemoryImage(wasmBytes) {
+  const segments = extractWasmDataSegments(wasmBytes).filter(
+    (segment) => segment.memoryOffset !== null,
+  );
+  if (segments.length === 0) {
+    return null;
+  }
+  const maxEnd = segments.reduce(
+    (max, segment) => Math.max(max, segment.memoryOffset + segment.bytes.length),
+    0,
+  );
+  if (!Number.isSafeInteger(maxEnd) || maxEnd <= 0) {
+    return null;
+  }
+  const memory = new Uint8Array(maxEnd);
+  for (const segment of segments) {
+    memory.set(segment.bytes, segment.memoryOffset);
+  }
+  return memory;
+}
+
+function scanForEmbeddedPlgManifest(bytes, options = {}) {
+  const expectedPluginId =
+    typeof options.expectedPluginId === "string" && options.expectedPluginId.length > 0
+      ? options.expectedPluginId
+      : null;
+  const expectedVersion =
+    typeof options.expectedVersion === "string" && options.expectedVersion.length > 0
+      ? options.expectedVersion
+      : null;
+  let fallback = null;
+  let searchStart = 0;
+  while (searchStart < bytes.length) {
+    const identifierOffset = indexOfBytes(
+      bytes,
+      PLG_IDENTIFIER_BYTES,
+      searchStart,
+    );
+    if (identifierOffset === -1) {
+      break;
+    }
+    searchStart = identifierOffset + PLG_IDENTIFIER_BYTES.length;
+    if (identifierOffset < 4) {
+      continue;
+    }
+    const start = identifierOffset - 4;
+    // Upper bound on the manifest size — grab up to 64KB and let the caller
+    // decide how much to trim. FlatBuffer decoders only read what they need.
+    const end = Math.min(bytes.length, start + 65536);
+    const candidate = bytes.slice(start, end);
+    if (!isPlgManifestBuffer(candidate)) {
+      continue;
+    }
+    let decoded = null;
+    try {
+      decoded = decodePlgManifest(candidate);
+    } catch {
+      continue;
+    }
+    if (
+      !isPlausibleEmbeddedManifestString(decoded?.pluginId) ||
+      !isPlausibleEmbeddedManifestString(decoded?.name) ||
+      !isPlausibleEmbeddedManifestString(decoded?.version, 128)
+    ) {
+      continue;
+    }
+    const located = { start, identifierOffset, bytes: candidate, decoded };
+    if (
+      (!expectedPluginId || decoded.pluginId === expectedPluginId) &&
+      (!expectedVersion || decoded.version === expectedVersion)
+    ) {
+      return located;
+    }
+    fallback ??= located;
+  }
+  return fallback;
+}
+
+function decodeManifestCandidate(candidate, options = {}) {
+  const bytes = candidate instanceof Uint8Array ? candidate.slice() : new Uint8Array(candidate);
+  if (!isPlgManifestBuffer(bytes)) {
+    return null;
+  }
+  let decoded = null;
+  try {
+    decoded = decodePlgManifest(bytes);
+  } catch {
+    return null;
+  }
+  if (
+    !isPlausibleEmbeddedManifestString(decoded?.pluginId) ||
+    !isPlausibleEmbeddedManifestString(decoded?.name) ||
+    !isPlausibleEmbeddedManifestString(decoded?.version, 128)
+  ) {
+    return null;
+  }
+  const expectedPluginId =
+    typeof options.expectedPluginId === "string" && options.expectedPluginId.length > 0
+      ? options.expectedPluginId
+      : null;
+  const expectedVersion =
+    typeof options.expectedVersion === "string" && options.expectedVersion.length > 0
+      ? options.expectedVersion
+      : null;
+  if (
+    (expectedPluginId && decoded.pluginId !== expectedPluginId) ||
+    (expectedVersion && decoded.version !== expectedVersion)
+  ) {
+    return null;
+  }
+  return { start: 0, identifierOffset: 4, bytes, decoded };
+}
+
 /**
  * Scan wasm bytes for the canonical `$PLG` FlatBuffer identifier and, when
  * found, return both the raw offset and the smallest aligned candidate buffer
@@ -1393,23 +1615,32 @@ function indexOfBytes(haystack, needle, startIndex = 0) {
  * so we walk backwards one 4-byte word and hand the caller a slice starting
  * there.
  */
-export function locateEmbeddedPlgManifest(wasmBytes) {
+export function locateEmbeddedPlgManifest(wasmBytes, options = {}) {
   const bytes = wasmBytes instanceof Uint8Array
     ? wasmBytes
     : new Uint8Array(wasmBytes);
-  const identifierOffset = indexOfBytes(bytes, PLG_IDENTIFIER_BYTES);
-  if (identifierOffset < 4) {
-    return null;
+  for (const sectionBytes of getWasmCustomSections(bytes, SDS_MANIFEST_SECTION_NAME)) {
+    const located = decodeManifestCandidate(sectionBytes, options);
+    if (located) {
+      return { ...located, source: "custom-section" };
+    }
   }
-  const start = identifierOffset - 4;
-  // Upper bound on the manifest size — grab up to 64KB and let the caller
-  // decide how much to trim. FlatBuffer decoders only read what they need.
-  const end = Math.min(bytes.length, start + 65536);
-  const candidate = bytes.subarray(start, end);
-  if (!isPlgManifestBuffer(candidate)) {
-    return null;
+  const dataPayloads = concatenateWasmDataSegmentPayloads(bytes);
+  if (dataPayloads) {
+    const located = scanForEmbeddedPlgManifest(dataPayloads, options);
+    if (located) {
+      return { ...located, source: "data-payloads" };
+    }
   }
-  return { start, identifierOffset, bytes: candidate };
+  const memoryImage = reconstructWasmDataMemoryImage(bytes);
+  if (memoryImage) {
+    const located = scanForEmbeddedPlgManifest(memoryImage, options);
+    if (located) {
+      return { ...located, source: "data-memory" };
+    }
+  }
+  const located = scanForEmbeddedPlgManifest(bytes, options);
+  return located ? { ...located, source: "raw-wasm" } : null;
 }
 
 export function hasLegacyPmanManifest(wasmBytes) {
@@ -1435,7 +1666,12 @@ function validateEmbeddedManifestBytes({
     );
   }
 
-  const located = locateEmbeddedPlgManifest(wasmBytes);
+  const sourcePluginId = manifest?.pluginId ?? manifest?.plugin_id ?? null;
+  const sourceVersion = manifest?.version ?? null;
+  const located = locateEmbeddedPlgManifest(wasmBytes, {
+    expectedPluginId: sourcePluginId,
+    expectedVersion: sourceVersion,
+  });
   if (!located) {
     pushIssue(
       issues,
@@ -1447,9 +1683,9 @@ function validateEmbeddedManifestBytes({
     return;
   }
 
-  let decoded;
+  let decoded = located.decoded;
   try {
-    decoded = decodePlgManifest(located.bytes);
+    decoded ??= decodePlgManifest(located.bytes);
   } catch (error) {
     pushIssue(
       issues,
@@ -1461,7 +1697,6 @@ function validateEmbeddedManifestBytes({
     return;
   }
 
-  const sourcePluginId = manifest?.pluginId ?? manifest?.plugin_id ?? null;
   if (
     isNonEmptyString(sourcePluginId) &&
     isNonEmptyString(decoded?.pluginId) &&
@@ -1476,7 +1711,6 @@ function validateEmbeddedManifestBytes({
     );
   }
 
-  const sourceVersion = manifest?.version ?? null;
   if (
     isNonEmptyString(sourceVersion) &&
     isNonEmptyString(decoded?.version) &&

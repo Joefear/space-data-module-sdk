@@ -5,15 +5,27 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { WASI } from "node:wasi";
 
+import * as flatbuffers from "../src/vendor/flatbuffers/flatbuffers.js";
+import { PIV, PIVT } from "spacedatastandards.org/lib/js/PIV/PIV.js";
+import { PIVRequestT } from "spacedatastandards.org/lib/js/PIV/PIVRequest.js";
+import { PIVResponseT } from "spacedatastandards.org/lib/js/PIV/PIVResponse.js";
+import { TABT } from "spacedatastandards.org/lib/js/PIV/TAB.js";
+import { FlatBufferTypeRefT } from "spacedatastandards.org/lib/js/PIV/FlatBufferTypeRef.js";
+import { bufferMutability as SdsBufferMutability } from "spacedatastandards.org/lib/js/PIV/bufferMutability.js";
+import { bufferOwnership as SdsBufferOwnership } from "spacedatastandards.org/lib/js/PIV/bufferOwnership.js";
+
 import {
   cleanupCompilation,
   compileModuleFromSource,
   decodePluginInvokeRequest,
   decodePluginInvokeResponse,
+  encodeLegacyPluginInvokeRequest,
   encodePluginInvokeRequest,
   encodePluginInvokeResponse,
   encodePluginManifest,
 } from "../src/index.js";
+import { BufferMutability } from "../src/generated/orbpro/stream/buffer-mutability.js";
+import { BufferOwnership } from "../src/generated/orbpro/stream/buffer-ownership.js";
 
 function createPort(portId, required = true) {
   return {
@@ -70,6 +82,118 @@ function createPayload(label) {
   );
 }
 
+function hasPivIdentifier(bytes) {
+  return PIV.bufferHasIdentifier(new flatbuffers.ByteBuffer(bytes));
+}
+
+function getPivRequest(bytes) {
+  const bb = new flatbuffers.ByteBuffer(bytes);
+  return PIV.getRootAsPIV(bb).REQUEST();
+}
+
+function encodeExternalArenaPivRequest({
+  methodId = "fanout",
+  traceId = 0n,
+  offset = 4096,
+  size = 4,
+} = {}) {
+  const builder = new flatbuffers.Builder(1024);
+  const root = new PIVT(
+    new PIVRequestT(
+      methodId,
+      [
+        new TABT(
+          offset,
+          size,
+          8,
+          0,
+          new FlatBufferTypeRefT("PluginManifest.fbs", "PMAN", null, null),
+          SdsBufferMutability.IMMUTABLE,
+          SdsBufferOwnership.HOST_OWNED,
+          0n,
+          "alpha",
+        ),
+      ],
+      [],
+      traceId,
+      0,
+    ),
+    null,
+  ).pack(builder);
+  PIV.finishPIVBuffer(builder, root);
+  return builder.asUint8Array();
+}
+
+function encodePivRequestWithTabRange({
+  methodId = "fanout",
+  traceId = 0n,
+  offset = 0,
+  size = 0,
+  arena = [1, 2, 3, 4],
+} = {}) {
+  const builder = new flatbuffers.Builder(1024);
+  const root = new PIVT(
+    new PIVRequestT(
+      methodId,
+      [
+        new TABT(
+          offset,
+          size,
+          8,
+          0,
+          new FlatBufferTypeRefT("PluginManifest.fbs", "PMAN", null, null),
+          SdsBufferMutability.IMMUTABLE,
+          SdsBufferOwnership.HOST_OWNED,
+          0n,
+          "alpha",
+        ),
+      ],
+      arena,
+      traceId,
+      0,
+    ),
+    null,
+  ).pack(builder);
+  PIV.finishPIVBuffer(builder, root);
+  return builder.asUint8Array();
+}
+
+function encodeExternalArenaPivResponse({
+  traceId = 0n,
+  offset = 4096,
+  size = 4,
+} = {}) {
+  const builder = new flatbuffers.Builder(1024);
+  const root = new PIVT(
+    null,
+    new PIVResponseT(
+      0,
+      0,
+      false,
+      0,
+      [
+        new TABT(
+          offset,
+          size,
+          8,
+          0,
+          new FlatBufferTypeRefT("PluginManifest.fbs", "PMAN", null, null),
+          SdsBufferMutability.IMMUTABLE,
+          SdsBufferOwnership.HOST_OWNED,
+          0n,
+          "alpha",
+        ),
+      ],
+      [],
+      null,
+      null,
+      traceId,
+    ),
+  ).pack(builder);
+  PIV.finishPIVBuffer(builder, root);
+  return builder.asUint8Array();
+}
+
 function createEchoSource(outputPortId = "out") {
   return `#include <stdint.h>
 #include "space_data_module_invoke.h"
@@ -115,6 +239,29 @@ int fanout(void) {
       frame->payload,
       frame->payload_length
     );
+  }
+  return 0;
+}
+`;
+
+const STREAM_OUTPUT_SOURCE = `#include <stdint.h>
+#include "space_data_module_invoke.h"
+
+int stream_output(void) {
+  static const uint8_t payload[4] = { 9, 8, 7, 6 };
+  plugin_reset_output_state();
+  int32_t output_index = plugin_push_output(
+    "out",
+    "PluginManifest.fbs",
+    "PMAN",
+    payload,
+    4
+  );
+  if (output_index < 0) {
+    return 5;
+  }
+  if (plugin_set_output_stream_frame((uint32_t)output_index, 7, 1) != 0) {
+    return 6;
   }
   return 0;
 }
@@ -192,6 +339,14 @@ function invokeDirect(instance, requestBytes) {
     responseBytes,
     response: decodePluginInvokeResponse(responseBytes),
   };
+}
+
+function invokeDirectRaw(instance, requestPtr, requestLen, responseLenOutPtr) {
+  return instance.exports.plugin_invoke_stream(
+    requestPtr,
+    requestLen,
+    responseLenOutPtr,
+  );
 }
 
 function runCommandModule(wasmBytes, { args = [], stdinBytes = new Uint8Array() } = {}) {
@@ -281,6 +436,90 @@ test("plugin invoke request and response round-trip through FlatBuffer encoding"
   assert.equal(decodedResponse.errorCode, "custom-error");
   assert.equal(decodedResponse.outputs.length, 1);
   assert.deepEqual(Array.from(decodedResponse.outputs[0].payload), Array.from(payloadAlpha));
+});
+
+test("public invoke codec emits SDS PIV envelopes by default", () => {
+  const payload = createPayload("piv-envelope");
+  const encodedRequest = encodePluginInvokeRequest({
+    methodId: "fanout",
+    inputs: [
+      {
+        portId: "input",
+        typeRef: {
+          schemaName: "PluginManifest.fbs",
+          fileIdentifier: "PMAN",
+        },
+        mutability: BufferMutability.MUTABLE,
+        ownership: BufferOwnership.HOST_OWNED,
+        sequence: 5,
+        endOfStream: true,
+        payload,
+      },
+    ],
+    traceId: 42n,
+  });
+  const encodedResponse = encodePluginInvokeResponse({
+    statusCode: 0,
+    outputs: [
+      {
+        portId: "output",
+        typeRef: {
+          schemaName: "PluginManifest.fbs",
+          fileIdentifier: "PMAN",
+        },
+        payload,
+      },
+    ],
+  });
+
+  assert.equal(hasPivIdentifier(encodedRequest), true);
+  assert.equal(hasPivIdentifier(encodedResponse), true);
+  const request = getPivRequest(encodedRequest);
+  assert.equal(request.TRACE_ID(), 42n);
+  const frame = request.INPUTS(0);
+  assert.equal(frame.MUTABILITY(), SdsBufferMutability.SINGLE_WRITER_MUTABLE);
+  assert.equal(frame.OWNERSHIP(), SdsBufferOwnership.HOST_OWNED);
+  assert.equal(frame.FRAME_ID(), 11n);
+});
+
+test("public invoke decoder materializes SDS PIV external arenas only when provided", () => {
+  const externalArena = Uint8Array.from(
+    { length: 16 },
+    (_, index) => index + 1,
+  );
+  assert.throws(
+    () =>
+      decodePluginInvokeRequest(
+        encodeExternalArenaPivRequest({ offset: 8, size: 4 }),
+      ),
+    /external arena/i,
+  );
+  assert.throws(
+    () =>
+      decodePluginInvokeResponse(
+        encodeExternalArenaPivResponse({ offset: 8, size: 4 }),
+      ),
+    /external arena/i,
+  );
+
+  assert.deepEqual(
+    Array.from(
+      decodePluginInvokeRequest(
+        encodeExternalArenaPivRequest({ offset: 8, size: 4 }),
+        { externalArena },
+      ).inputs[0].payload,
+    ),
+    [9, 10, 11, 12],
+  );
+  assert.deepEqual(
+    Array.from(
+      decodePluginInvokeResponse(
+        encodeExternalArenaPivResponse({ offset: 8, size: 4 }),
+        { externalArena },
+      ).outputs[0].payload,
+    ),
+    [9, 10, 11, 12],
+  );
 });
 
 test("plugin invoke envelopes round-trip large payload arenas without stack overflow", () => {
@@ -381,6 +620,7 @@ test("direct invoke ABI routes multi-port frames and round-trips payload bytes",
     const payloadBeta = createPayload("beta");
     const requestBytes = encodePluginInvokeRequest({
       methodId: "fanout",
+      traceId: 987654321n,
       inputs: [
         {
           portId: "alpha",
@@ -400,8 +640,10 @@ test("direct invoke ABI routes multi-port frames and round-trips payload bytes",
         },
       ],
     });
-    const { response } = invokeDirect(instance, requestBytes);
+    const { responseBytes, response } = invokeDirect(instance, requestBytes);
+    assert.equal(hasPivIdentifier(responseBytes), true);
     assert.equal(response.statusCode, 0);
+    assert.equal(response.traceId, 987654321n);
     assert.equal(response.outputs.length, 2);
     assert.deepEqual(
       response.outputs.map((frame) => frame.portId),
@@ -409,12 +651,30 @@ test("direct invoke ABI routes multi-port frames and round-trips payload bytes",
     );
     assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payloadAlpha));
     assert.deepEqual(Array.from(response.outputs[1].payload), Array.from(payloadBeta));
+
+    const legacyRequestBytes = encodeLegacyPluginInvokeRequest({
+      methodId: "fanout",
+      inputs: [
+        {
+          portId: "alpha",
+          typeRef: {
+            schemaName: "PluginManifest.fbs",
+            fileIdentifier: "PMAN",
+          },
+          payload: payloadAlpha,
+        },
+      ],
+    });
+    const legacyResult = invokeDirect(instance, legacyRequestBytes);
+    assert.equal(hasPivIdentifier(legacyResult.responseBytes), true);
+    assert.equal(legacyResult.response.statusCode, 400);
+    assert.equal(legacyResult.response.errorCode, "missing-required-input");
   } finally {
     await cleanupCompilation(compilation);
   }
 });
 
-test("direct invoke ABI preserves explicit aligned layout metadata", async () => {
+test("direct invoke ABI preserves SDS PIV/TAB aligned layout metadata", async () => {
   const manifest = createInvokeManifest({
     pluginId: "com.digitalarsenal.examples.invoke-aligned-metadata",
     invokeSurfaces: ["direct"],
@@ -456,8 +716,8 @@ test("direct invoke ABI preserves explicit aligned layout metadata", async () =>
     assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payload));
     assert.equal(response.outputs[0].typeRef?.wireFormat, "aligned-binary");
     assert.equal(response.outputs[0].typeRef?.rootTypeName, "StateVector");
-    assert.equal(response.outputs[0].typeRef?.fixedStringLength, 255);
-    assert.equal(response.outputs[0].typeRef?.byteLength, 64);
+    assert.equal(response.outputs[0].typeRef?.fixedStringLength, 0);
+    assert.equal(response.outputs[0].typeRef?.byteLength, payload.length);
     assert.equal(response.outputs[0].typeRef?.requiredAlignment, 16);
     assert.equal(response.outputs[0].alignment, 16);
   } finally {
@@ -607,7 +867,7 @@ test("direct invoke ABI returns canonical error responses for invalid requests",
       }),
     ).response;
     assert.equal(missingRequiredInput.statusCode, 400);
-    assert.equal(missingRequiredInput.errorCode, "missing-required-input");
+    assert.equal(missingRequiredInput.errorCode, "unknown-input-port");
 
     const invalidRequest = invokeDirect(
       instance,
@@ -615,6 +875,264 @@ test("direct invoke ABI returns canonical error responses for invalid requests",
     ).response;
     assert.equal(invalidRequest.statusCode, 400);
     assert.equal(invalidRequest.errorCode, "invalid-request");
+
+    const externalArenaRequest = invokeDirect(
+      instance,
+      encodeExternalArenaPivRequest({
+        methodId: "fanout",
+        traceId: 22n,
+        offset: 0x7ffffff0,
+        size: 4,
+      }),
+    ).response;
+    assert.equal(externalArenaRequest.statusCode, 400);
+    assert.equal(externalArenaRequest.errorCode, "invalid-request-pointer");
+    assert.equal(externalArenaRequest.traceId, 22n);
+
+    const wrappingRangeRequest = invokeDirect(
+      instance,
+      encodePivRequestWithTabRange({
+        methodId: "fanout",
+        traceId: 33n,
+        offset: 0xfffffffe,
+        size: 4,
+        arena: [1, 2, 3, 4],
+      }),
+    ).response;
+    assert.equal(wrappingRangeRequest.statusCode, 400);
+    assert.equal(wrappingRangeRequest.errorCode, "invalid-request-frame");
+    assert.equal(wrappingRangeRequest.traceId, 33n);
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("direct invoke ABI rejects unsupported declared input frame types", async () => {
+  const manifest = {
+    ...createInvokeManifest({
+      pluginId: "com.digitalarsenal.examples.invoke-input-type-guards",
+      invokeSurfaces: ["direct"],
+      methodId: "fanout",
+      inputPortIds: ["alpha"],
+      outputPortIds: ["alpha"],
+    }),
+    methods: [
+      {
+        methodId: "fanout",
+        displayName: "fanout",
+        inputPorts: [
+          {
+            portId: "alpha",
+            acceptedTypeSets: [
+              {
+                setId: "plugin-manifest-only",
+                allowedTypes: [
+                  {
+                    schemaName: "PluginManifest.fbs",
+                    fileIdentifier: "PMAN",
+                  },
+                ],
+              },
+            ],
+            minStreams: 1,
+            maxStreams: 1,
+            required: true,
+          },
+        ],
+        outputPorts: [
+          {
+            portId: "alpha",
+            acceptedTypeSets: [
+              {
+                setId: "alpha-any",
+                allowedTypes: [{ acceptsAnyFlatbuffer: true }],
+              },
+            ],
+            minStreams: 0,
+            maxStreams: 1,
+            required: false,
+          },
+        ],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+    ],
+  };
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: FANOUT_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const unsupportedType = invokeDirect(
+      instance,
+      encodePluginInvokeRequest({
+        methodId: "fanout",
+        inputs: [
+          {
+            portId: "alpha",
+            typeRef: {
+              schemaName: "Other.fbs",
+              fileIdentifier: "OTHR",
+            },
+            payload: createPayload("unsupported-input-type"),
+          },
+        ],
+      }),
+    ).response;
+
+    assert.equal(unsupportedType.statusCode, 400);
+    assert.equal(unsupportedType.errorCode, "unsupported-input-type");
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("direct invoke ABI accepts SDS PIV TAB payloads from SDK-owned guest memory", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-external-arena",
+    invokeSurfaces: ["direct"],
+    methodId: "fanout",
+    inputPortIds: ["alpha"],
+    outputPortIds: ["alpha"],
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: FANOUT_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const alloc = instance.exports.plugin_alloc;
+    const free = instance.exports.plugin_free;
+    const memory = instance.exports.memory;
+    const payload = createPayload("external-arena");
+    const payloadPtr = alloc(payload.length);
+    new Uint8Array(memory.buffer, payloadPtr, payload.length).set(payload);
+
+    const { response } = invokeDirect(
+      instance,
+      encodeExternalArenaPivRequest({
+        methodId: "fanout",
+        traceId: 55n,
+        offset: payloadPtr,
+        size: payload.length,
+      }),
+    );
+    assert.equal(response.statusCode, 0);
+    assert.equal(response.traceId, 55n);
+    assert.equal(response.outputs.length, 1);
+    assert.equal(response.outputs[0].portId, "alpha");
+    assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payload));
+
+    free(payloadPtr, payload.length);
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("direct invoke ABI fails closed for invalid guest ABI pointers", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-pointer-guards",
+    invokeSurfaces: ["direct"],
+    methodId: "fanout",
+    inputPortIds: ["alpha"],
+    outputPortIds: ["alpha"],
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: FANOUT_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const alloc = instance.exports.plugin_alloc;
+    const free = instance.exports.plugin_free;
+    const memory = instance.exports.memory;
+    const lenOutPtr = alloc(4);
+
+    let responsePtr = 0;
+    assert.doesNotThrow(() => {
+      responsePtr = invokeDirectRaw(instance, 0x7ffffff0, 16, lenOutPtr);
+    });
+    const responseLen = new DataView(memory.buffer).getUint32(lenOutPtr, true);
+    const responseBytes = new Uint8Array(
+      memory.buffer.slice(responsePtr, responsePtr + responseLen),
+    );
+    const response = decodePluginInvokeResponse(responseBytes);
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.errorCode, "invalid-request-pointer");
+    free(responsePtr, responseLen);
+    free(lenOutPtr, 4);
+    assert.doesNotThrow(() => {
+      free(0x7ffffff0, 16);
+    });
+
+    const requestBytes = encodePluginInvokeRequest({
+      methodId: "fanout",
+      inputs: [
+        {
+          portId: "alpha",
+          typeRef: { schemaName: "PluginManifest.fbs", fileIdentifier: "PMAN" },
+          payload: createPayload("pointer-guard"),
+        },
+      ],
+    });
+    const requestPtr = alloc(requestBytes.length);
+    new Uint8Array(memory.buffer, requestPtr, requestBytes.length).set(requestBytes);
+    assert.doesNotThrow(() => {
+      assert.equal(
+        invokeDirectRaw(instance, requestPtr, requestBytes.length, 0x7ffffff0),
+        0,
+      );
+    });
+    free(requestPtr, requestBytes.length);
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("direct invoke ABI serializes explicit output stream frame metadata into TAB.FRAME_ID", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-output-stream-frame",
+    invokeSurfaces: ["direct"],
+    methodId: "stream_output",
+    inputPortIds: ["in"],
+    outputPortIds: ["out"],
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: STREAM_OUTPUT_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const { response } = invokeDirect(
+      instance,
+      encodePluginInvokeRequest({
+        methodId: "stream_output",
+        inputs: [
+          {
+            portId: "in",
+            typeRef: {
+              schemaName: "PluginManifest.fbs",
+              fileIdentifier: "PMAN",
+            },
+            payload: createPayload("stream-frame-input"),
+          },
+        ],
+      }),
+    );
+    assert.equal(response.statusCode, 0);
+    assert.equal(response.outputs.length, 1);
+    assert.equal(response.outputs[0].sequence, 7n);
+    assert.equal(response.outputs[0].endOfStream, true);
+    assert.equal(response.outputs[0].traceId, 15n);
   } finally {
     await cleanupCompilation(compilation);
   }

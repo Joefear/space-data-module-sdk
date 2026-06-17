@@ -16,6 +16,7 @@ import {
   SDS_CUSTOM_SECTION_PREFIX,
   SDS_DEPLOYMENT_ENTRY_ID,
   SDS_DEPLOYMENT_SECTION_NAME,
+  SDS_MANIFEST_SECTION_NAME,
   SDS_MBL_CONTAINER_NAME,
 } from "./constants.js";
 import {
@@ -251,7 +252,7 @@ function normalizeManifestEntry(manifest, manifestBytes) {
   return {
     entryId: "manifest",
     role: "manifest",
-    sectionName: "sds.manifest",
+    sectionName: SDS_MANIFEST_SECTION_NAME,
     payloadEncoding: "flatbuffer",
     typeRef: isPlg
       ? {

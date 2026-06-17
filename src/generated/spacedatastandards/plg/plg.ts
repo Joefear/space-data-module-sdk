@@ -4,18 +4,25 @@
 
 import * as flatbuffers from 'flatbuffers';
 
-import { EntryFunction } from './entry-function.js';
-import { PluginCapability } from './plugin-capability.js';
-import { PluginDependency } from './plugin-dependency.js';
-import { pluginCategory } from './plugin-category.js';
-import { publicationState } from './publication-state.js';
-import { purchaseTier } from './purchase-tier.js';
+import { EntryFunction, EntryFunctionT } from './EntryFunction.js';
+import { FlatBufferTypeRef, FlatBufferTypeRefT } from './FlatBufferTypeRef.js';
+import { PLGBuildArtifact, PLGBuildArtifactT } from './PLGBuildArtifact.js';
+import { PLGHostCapability, PLGHostCapabilityT } from './PLGHostCapability.js';
+import { PLGMethodManifest, PLGMethodManifestT } from './PLGMethodManifest.js';
+import { PLGProtocolSpec, PLGProtocolSpecT } from './PLGProtocolSpec.js';
+import { PLGTimerSpec, PLGTimerSpecT } from './PLGTimerSpec.js';
+import { PluginCapability, PluginCapabilityT } from './PluginCapability.js';
+import { PluginDependency, PluginDependencyT } from './PluginDependency.js';
+import { invokeSurfaceKind } from './invokeSurfaceKind.js';
+import { pluginCategory } from './pluginCategory.js';
+import { publicationState } from './publicationState.js';
+import { purchaseTier } from './purchaseTier.js';
 
 
 /**
  * Plugin Manifest - canonical signed storefront and WASM distribution record
  */
-export class PLG {
+export class PLG implements flatbuffers.IUnpackableObject<PLGT> {
   bb: flatbuffers.ByteBuffer|null = null;
   bb_pos = 0;
   __init(i:number, bb:flatbuffers.ByteBuffer):PLG {
@@ -40,39 +47,39 @@ static bufferHasIdentifier(bb:flatbuffers.ByteBuffer):boolean {
 /**
  * Unique identifier for the plugin
  */
-pluginId():string|null
-pluginId(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-pluginId(optionalEncoding?:any):string|Uint8Array|null {
+PLUGIN_ID():string
+PLUGIN_ID(optionalEncoding:flatbuffers.Encoding):string|Uint8Array
+PLUGIN_ID(optionalEncoding?:any):string|Uint8Array {
   const offset = this.bb!.__offset(this.bb_pos, 4);
-  return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
+  return this.bb!.__string(this.bb_pos + offset, optionalEncoding);
 }
 
 /**
  * Human-readable plugin name
  */
-name():string|null
-name(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-name(optionalEncoding?:any):string|Uint8Array|null {
+NAME():string
+NAME(optionalEncoding:flatbuffers.Encoding):string|Uint8Array
+NAME(optionalEncoding?:any):string|Uint8Array {
   const offset = this.bb!.__offset(this.bb_pos, 6);
-  return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
+  return this.bb!.__string(this.bb_pos + offset, optionalEncoding);
 }
 
 /**
  * Plugin version (semver format)
  */
-version():string|null
-version(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-version(optionalEncoding?:any):string|Uint8Array|null {
+VERSION():string
+VERSION(optionalEncoding:flatbuffers.Encoding):string|Uint8Array
+VERSION(optionalEncoding?:any):string|Uint8Array {
   const offset = this.bb!.__offset(this.bb_pos, 8);
-  return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
+  return this.bb!.__string(this.bb_pos + offset, optionalEncoding);
 }
 
 /**
  * Detailed description of plugin functionality
  */
-description():string|null
-description(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-description(optionalEncoding?:any):string|Uint8Array|null {
+DESCRIPTION():string|null
+DESCRIPTION(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+DESCRIPTION(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 10);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -80,9 +87,9 @@ description(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * Short marketing summary shown in storefront listings
  */
-tagline():string|null
-tagline(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-tagline(optionalEncoding?:any):string|Uint8Array|null {
+TAGLINE():string|null
+TAGLINE(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+TAGLINE(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 12);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -90,7 +97,7 @@ tagline(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * Type/category of the plugin
  */
-pluginType():pluginCategory {
+PLUGIN_TYPE():pluginCategory {
   const offset = this.bb!.__offset(this.bb_pos, 14);
   return offset ? this.bb!.readInt8(this.bb_pos + offset) : pluginCategory.Sensor;
 }
@@ -98,9 +105,9 @@ pluginType():pluginCategory {
 /**
  * Human-readable publisher or organization name
  */
-publisherName():string|null
-publisherName(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-publisherName(optionalEncoding?:any):string|Uint8Array|null {
+PUBLISHER_NAME():string|null
+PUBLISHER_NAME(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+PUBLISHER_NAME(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 16);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -108,9 +115,9 @@ publisherName(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * Publisher handle or username
  */
-publisherHandle():string|null
-publisherHandle(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-publisherHandle(optionalEncoding?:any):string|Uint8Array|null {
+PUBLISHER_HANDLE():string|null
+PUBLISHER_HANDLE(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+PUBLISHER_HANDLE(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 18);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -118,9 +125,9 @@ publisherHandle(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * Canonical publisher website
  */
-publisherUrl():string|null
-publisherUrl(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-publisherUrl(optionalEncoding?:any):string|Uint8Array|null {
+PUBLISHER_URL():string|null
+PUBLISHER_URL(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+PUBLISHER_URL(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 20);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -128,9 +135,9 @@ publisherUrl(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * Support or helpdesk URL for this plugin
  */
-supportUrl():string|null
-supportUrl(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-supportUrl(optionalEncoding?:any):string|Uint8Array|null {
+SUPPORT_URL():string|null
+SUPPORT_URL(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+SUPPORT_URL(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 22);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -138,9 +145,9 @@ supportUrl(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * Search and categorization tags for discovery
  */
-tags(index: number):string
-tags(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
-tags(index: number,optionalEncoding?:any):string|Uint8Array|null {
+TAGS(index: number):string
+TAGS(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
+TAGS(index: number,optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 24);
   return offset ? this.bb!.__string(this.bb!.__vector(this.bb_pos + offset) + index * 4, optionalEncoding) : null;
 }
@@ -153,9 +160,9 @@ tagsLength():number {
 /**
  * Short feature bullets highlighted in storefront listings
  */
-features(index: number):string
-features(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
-features(index: number,optionalEncoding?:any):string|Uint8Array|null {
+FEATURES(index: number):string
+FEATURES(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
+FEATURES(index: number,optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 26);
   return offset ? this.bb!.__string(this.bb!.__vector(this.bb_pos + offset) + index * 4, optionalEncoding) : null;
 }
@@ -168,9 +175,9 @@ featuresLength():number {
 /**
  * Screenshot URLs showing the plugin in use
  */
-screenshotUrls(index: number):string
-screenshotUrls(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
-screenshotUrls(index: number,optionalEncoding?:any):string|Uint8Array|null {
+SCREENSHOT_URLS(index: number):string
+SCREENSHOT_URLS(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
+SCREENSHOT_URLS(index: number,optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 28);
   return offset ? this.bb!.__string(this.bb!.__vector(this.bb_pos + offset) + index * 4, optionalEncoding) : null;
 }
@@ -183,9 +190,9 @@ screenshotUrlsLength():number {
 /**
  * Optional hero/banner image URL for the listing
  */
-bannerUrl():string|null
-bannerUrl(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-bannerUrl(optionalEncoding?:any):string|Uint8Array|null {
+BANNER_URL():string|null
+BANNER_URL(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+BANNER_URL(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 30);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -193,7 +200,7 @@ bannerUrl(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * ABI version for compatibility checking
  */
-abiVersion():number {
+ABI_VERSION():number {
   const offset = this.bb!.__offset(this.bb_pos, 32);
   return offset ? this.bb!.readUint32(this.bb_pos + offset) : 1;
 }
@@ -201,7 +208,7 @@ abiVersion():number {
 /**
  * SHA256 hash of the decrypted WASM binary
  */
-wasmHash(index: number):number|null {
+WASM_HASH(index: number):number|null {
   const offset = this.bb!.__offset(this.bb_pos, 34);
   return offset ? this.bb!.readUint8(this.bb!.__vector(this.bb_pos + offset) + index) : 0;
 }
@@ -219,7 +226,7 @@ wasmHashArray():Uint8Array|null {
 /**
  * Size of decrypted WASM binary in bytes
  */
-wasmSize():bigint {
+WASM_SIZE():bigint {
   const offset = this.bb!.__offset(this.bb_pos, 36);
   return offset ? this.bb!.readUint64(this.bb_pos + offset) : BigInt('0');
 }
@@ -227,9 +234,9 @@ wasmSize():bigint {
 /**
  * IPFS CID of the encrypted WASM binary
  */
-wasmCid():string|null
-wasmCid(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-wasmCid(optionalEncoding?:any):string|Uint8Array|null {
+WASM_CID():string|null
+WASM_CID(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+WASM_CID(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 38);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -237,7 +244,7 @@ wasmCid(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * SHA256 hash of the encrypted delivery artifact bytes
  */
-encryptedWasmHash(index: number):number|null {
+ENCRYPTED_WASM_HASH(index: number):number|null {
   const offset = this.bb!.__offset(this.bb_pos, 40);
   return offset ? this.bb!.readUint8(this.bb!.__vector(this.bb_pos + offset) + index) : 0;
 }
@@ -255,7 +262,7 @@ encryptedWasmHashArray():Uint8Array|null {
 /**
  * Size of the encrypted delivery artifact in bytes
  */
-encryptedWasmSize():bigint {
+ENCRYPTED_WASM_SIZE():bigint {
   const offset = this.bb!.__offset(this.bb_pos, 42);
   return offset ? this.bb!.readUint64(this.bb_pos + offset) : BigInt('0');
 }
@@ -263,7 +270,7 @@ encryptedWasmSize():bigint {
 /**
  * Entry point functions exported by the plugin
  */
-entryFunctions(index: number, obj?:EntryFunction):EntryFunction|null {
+ENTRY_FUNCTIONS(index: number, obj?:EntryFunction):EntryFunction|null {
   const offset = this.bb!.__offset(this.bb_pos, 44);
   return offset ? (obj || new EntryFunction()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
 }
@@ -276,9 +283,9 @@ entryFunctionsLength():number {
 /**
  * FlatBuffer schemas required by this plugin
  */
-requiredSchemas(index: number):string
-requiredSchemas(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
-requiredSchemas(index: number,optionalEncoding?:any):string|Uint8Array|null {
+REQUIRED_SCHEMAS(index: number):string
+REQUIRED_SCHEMAS(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
+REQUIRED_SCHEMAS(index: number,optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 46);
   return offset ? this.bb!.__string(this.bb!.__vector(this.bb_pos + offset) + index * 4, optionalEncoding) : null;
 }
@@ -291,7 +298,7 @@ requiredSchemasLength():number {
 /**
  * Other plugins this depends on
  */
-dependencies(index: number, obj?:PluginDependency):PluginDependency|null {
+DEPENDENCIES(index: number, obj?:PluginDependency):PluginDependency|null {
   const offset = this.bb!.__offset(this.bb_pos, 48);
   return offset ? (obj || new PluginDependency()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
 }
@@ -304,7 +311,7 @@ dependenciesLength():number {
 /**
  * Capabilities provided by this plugin
  */
-capabilities(index: number, obj?:PluginCapability):PluginCapability|null {
+CAPABILITIES(index: number, obj?:PluginCapability):PluginCapability|null {
   const offset = this.bb!.__offset(this.bb_pos, 50);
   return offset ? (obj || new PluginCapability()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
 }
@@ -317,9 +324,9 @@ capabilitiesLength():number {
 /**
  * Peer ID of the plugin provider
  */
-providerPeerId():string|null
-providerPeerId(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-providerPeerId(optionalEncoding?:any):string|Uint8Array|null {
+PROVIDER_PEER_ID():string|null
+PROVIDER_PEER_ID(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+PROVIDER_PEER_ID(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 52);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -327,9 +334,9 @@ providerPeerId(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * IPFS CID of provider's EPM (Entity Profile Message)
  */
-providerEpmCid():string|null
-providerEpmCid(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-providerEpmCid(optionalEncoding?:any):string|Uint8Array|null {
+PROVIDER_EPM_CID():string|null
+PROVIDER_EPM_CID(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+PROVIDER_EPM_CID(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 54);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -337,7 +344,7 @@ providerEpmCid(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * Whether the WASM binary is encrypted
  */
-encrypted():boolean {
+ENCRYPTED():boolean {
   const offset = this.bb!.__offset(this.bb_pos, 56);
   return offset ? !!this.bb!.readInt8(this.bb_pos + offset) : true;
 }
@@ -345,9 +352,9 @@ encrypted():boolean {
 /**
  * Canonical required scope for grant issuance
  */
-requiredScope():string|null
-requiredScope(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-requiredScope(optionalEncoding?:any):string|Uint8Array|null {
+REQUIRED_SCOPE():string|null
+REQUIRED_SCOPE(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+REQUIRED_SCOPE(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 58);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -355,9 +362,9 @@ requiredScope(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * Provider-local identifier for the module content key
  */
-keyId():string|null
-keyId(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-keyId(optionalEncoding?:any):string|Uint8Array|null {
+KEY_ID():string|null
+KEY_ID(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+KEY_ID(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 60);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -365,9 +372,9 @@ keyId(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * Allowed requester domains for module grants
  */
-allowedDomains(index: number):string
-allowedDomains(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
-allowedDomains(index: number,optionalEncoding?:any):string|Uint8Array|null {
+ALLOWED_DOMAINS(index: number):string
+ALLOWED_DOMAINS(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
+ALLOWED_DOMAINS(index: number,optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 62);
   return offset ? this.bb!.__string(this.bb!.__vector(this.bb_pos + offset) + index * 4, optionalEncoding) : null;
 }
@@ -380,7 +387,7 @@ allowedDomainsLength():number {
 /**
  * Maximum grant timeout allowed for this module publication
  */
-maxGrantTimeoutMs():bigint {
+MAX_GRANT_TIMEOUT_MS():bigint {
   const offset = this.bb!.__offset(this.bb_pos, 64);
   return offset ? this.bb!.readUint64(this.bb_pos + offset) : BigInt('0');
 }
@@ -388,9 +395,9 @@ maxGrantTimeoutMs():bigint {
 /**
  * Minimum permissions required to run
  */
-minPermissions(index: number):string
-minPermissions(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
-minPermissions(index: number,optionalEncoding?:any):string|Uint8Array|null {
+MIN_PERMISSIONS(index: number):string
+MIN_PERMISSIONS(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
+MIN_PERMISSIONS(index: number,optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 66);
   return offset ? this.bb!.__string(this.bb!.__vector(this.bb_pos + offset) + index * 4, optionalEncoding) : null;
 }
@@ -403,7 +410,7 @@ minPermissionsLength():number {
 /**
  * Unix timestamp when plugin was created
  */
-createdAt():bigint {
+CREATED_AT():bigint {
   const offset = this.bb!.__offset(this.bb_pos, 68);
   return offset ? this.bb!.readUint64(this.bb_pos + offset) : BigInt('0');
 }
@@ -411,7 +418,7 @@ createdAt():bigint {
 /**
  * Unix timestamp when plugin was last updated
  */
-updatedAt():bigint {
+UPDATED_AT():bigint {
   const offset = this.bb!.__offset(this.bb_pos, 70);
   return offset ? this.bb!.readUint64(this.bb_pos + offset) : BigInt('0');
 }
@@ -419,9 +426,9 @@ updatedAt():bigint {
 /**
  * URL to plugin documentation
  */
-documentationUrl():string|null
-documentationUrl(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-documentationUrl(optionalEncoding?:any):string|Uint8Array|null {
+DOCUMENTATION_URL():string|null
+DOCUMENTATION_URL(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+DOCUMENTATION_URL(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 72);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -429,9 +436,9 @@ documentationUrl(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * URL to plugin changelog or release notes
  */
-changelogUrl():string|null
-changelogUrl(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-changelogUrl(optionalEncoding?:any):string|Uint8Array|null {
+CHANGELOG_URL():string|null
+CHANGELOG_URL(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+CHANGELOG_URL(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 74);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -439,9 +446,9 @@ changelogUrl(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * URL to plugin icon/logo
  */
-iconUrl():string|null
-iconUrl(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-iconUrl(optionalEncoding?:any):string|Uint8Array|null {
+ICON_URL():string|null
+ICON_URL(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+ICON_URL(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 76);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -449,9 +456,9 @@ iconUrl(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * License identifier (SPDX format)
  */
-license():string|null
-license(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
-license(optionalEncoding?:any):string|Uint8Array|null {
+LICENSE():string|null
+LICENSE(optionalEncoding:flatbuffers.Encoding):string|Uint8Array|null
+LICENSE(optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 78);
   return offset ? this.bb!.__string(this.bb_pos + offset, optionalEncoding) : null;
 }
@@ -459,7 +466,7 @@ license(optionalEncoding?:any):string|Uint8Array|null {
 /**
  * Commercial model used for storefront purchase flows
  */
-paymentModel():purchaseTier {
+PAYMENT_MODEL():purchaseTier {
   const offset = this.bb!.__offset(this.bb_pos, 80);
   return offset ? this.bb!.readInt8(this.bb_pos + offset) : purchaseTier.Free;
 }
@@ -467,7 +474,7 @@ paymentModel():purchaseTier {
 /**
  * Price in USD cents for one-time purchase or subscription period
  */
-priceUsdCents():number {
+PRICE_USD_CENTS():number {
   const offset = this.bb!.__offset(this.bb_pos, 82);
   return offset ? this.bb!.readUint32(this.bb_pos + offset) : 0;
 }
@@ -475,7 +482,7 @@ priceUsdCents():number {
 /**
  * Subscription billing period length in days
  */
-subscriptionPeriodDays():number {
+SUBSCRIPTION_PERIOD_DAYS():number {
   const offset = this.bb!.__offset(this.bb_pos, 84);
   return offset ? this.bb!.readUint32(this.bb_pos + offset) : 0;
 }
@@ -483,9 +490,9 @@ subscriptionPeriodDays():number {
 /**
  * Accepted payment methods, e.g. "stripe", "sol", "usdc"
  */
-acceptedPaymentMethods(index: number):string
-acceptedPaymentMethods(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
-acceptedPaymentMethods(index: number,optionalEncoding?:any):string|Uint8Array|null {
+ACCEPTED_PAYMENT_METHODS(index: number):string
+ACCEPTED_PAYMENT_METHODS(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
+ACCEPTED_PAYMENT_METHODS(index: number,optionalEncoding?:any):string|Uint8Array|null {
   const offset = this.bb!.__offset(this.bb_pos, 86);
   return offset ? this.bb!.__string(this.bb!.__vector(this.bb_pos + offset) + index * 4, optionalEncoding) : null;
 }
@@ -498,7 +505,7 @@ acceptedPaymentMethodsLength():number {
 /**
  * Storefront publication state for this manifest version
  */
-listingStatus():publicationState {
+LISTING_STATUS():publicationState {
   const offset = this.bb!.__offset(this.bb_pos, 88);
   return offset ? this.bb!.readInt8(this.bb_pos + offset) : publicationState.Public;
 }
@@ -506,7 +513,7 @@ listingStatus():publicationState {
 /**
  * Ed25519 signature from provider over manifest
  */
-signature(index: number):number|null {
+SIGNATURE(index: number):number|null {
   const offset = this.bb!.__offset(this.bb_pos, 90);
   return offset ? this.bb!.readUint8(this.bb!.__vector(this.bb_pos + offset) + index) : 0;
 }
@@ -521,52 +528,168 @@ signatureArray():Uint8Array|null {
   return offset ? new Uint8Array(this.bb!.bytes().buffer, this.bb!.bytes().byteOffset + this.bb!.__vector(this.bb_pos + offset), this.bb!.__vector_len(this.bb_pos + offset)) : null;
 }
 
+/**
+ * Canonical invoke surfaces this artifact exposes. A single plugin
+ * MAY list both DIRECT and COMMAND when it supports both.
+ */
+INVOKE_SURFACES(index: number):invokeSurfaceKind|null {
+  const offset = this.bb!.__offset(this.bb_pos, 92);
+  return offset ? this.bb!.readUint8(this.bb!.__vector(this.bb_pos + offset) + index) : null;
+}
+
+invokeSurfacesLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 92);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
+
+invokeSurfacesArray():Uint8Array|null {
+  const offset = this.bb!.__offset(this.bb_pos, 92);
+  return offset ? new Uint8Array(this.bb!.bytes().buffer, this.bb!.bytes().byteOffset + this.bb!.__vector(this.bb_pos + offset), this.bb!.__vector_len(this.bb_pos + offset)) : null;
+}
+
+/**
+ * Rich per-method invoke manifests (port shape, drain semantics,
+ * accepted wire formats). ENTRY_FUNCTIONS retains the slim
+ * name+input_schemas+output_schema summary; METHODS carries the full
+ * invoke-surface detail including aligned-binary advertisement.
+ */
+METHODS(index: number, obj?:PLGMethodManifest):PLGMethodManifest|null {
+  const offset = this.bb!.__offset(this.bb_pos, 94);
+  return offset ? (obj || new PLGMethodManifest()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
+
+methodsLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 94);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
+
+/**
+ * Enum-typed host capability dependencies (richer than CAPABILITIES,
+ * which is string-tagged metadata).
+ */
+HOST_CAPABILITIES(index: number, obj?:PLGHostCapability):PLGHostCapability|null {
+  const offset = this.bb!.__offset(this.bb_pos, 96);
+  return offset ? (obj || new PLGHostCapability()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
+
+hostCapabilitiesLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 96);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
+
+/**
+ * Timer declarations for scheduled invocations.
+ */
+TIMERS(index: number, obj?:PLGTimerSpec):PLGTimerSpec|null {
+  const offset = this.bb!.__offset(this.bb_pos, 98);
+  return offset ? (obj || new PLGTimerSpec()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
+
+timersLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 98);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
+
+/**
+ * Protocol handler declarations.
+ */
+PROTOCOLS(index: number, obj?:PLGProtocolSpec):PLGProtocolSpec|null {
+  const offset = this.bb!.__offset(this.bb_pos, 100);
+  return offset ? (obj || new PLGProtocolSpec()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
+
+protocolsLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 100);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
+
+/**
+ * FlatBuffer schemas this plugin depends on at the invoke surface.
+ */
+SCHEMAS_USED(index: number, obj?:FlatBufferTypeRef):FlatBufferTypeRef|null {
+  const offset = this.bb!.__offset(this.bb_pos, 102);
+  return offset ? (obj || new FlatBufferTypeRef()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
+
+schemasUsedLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 102);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
+
+/**
+ * Build artifacts emitted by the toolchain (WASM, bindings, etc.).
+ */
+BUILD_ARTIFACTS(index: number, obj?:PLGBuildArtifact):PLGBuildArtifact|null {
+  const offset = this.bb!.__offset(this.bb_pos, 104);
+  return offset ? (obj || new PLGBuildArtifact()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+}
+
+buildArtifactsLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 104);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
+
+/**
+ * Opaque runtime-target tags (e.g. "wasmtime", "wasmedge", "browser").
+ */
+RUNTIME_TARGETS(index: number):string
+RUNTIME_TARGETS(index: number,optionalEncoding:flatbuffers.Encoding):string|Uint8Array
+RUNTIME_TARGETS(index: number,optionalEncoding?:any):string|Uint8Array|null {
+  const offset = this.bb!.__offset(this.bb_pos, 106);
+  return offset ? this.bb!.__string(this.bb!.__vector(this.bb_pos + offset) + index * 4, optionalEncoding) : null;
+}
+
+runtimeTargetsLength():number {
+  const offset = this.bb!.__offset(this.bb_pos, 106);
+  return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+}
+
 static startPLG(builder:flatbuffers.Builder) {
-  builder.startObject(44);
+  builder.startObject(52);
 }
 
-static addPluginId(builder:flatbuffers.Builder, pluginIdOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(0, pluginIdOffset, 0);
+static addPluginId(builder:flatbuffers.Builder, PLUGIN_IDOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(0, PLUGIN_IDOffset, 0);
 }
 
-static addName(builder:flatbuffers.Builder, nameOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(1, nameOffset, 0);
+static addName(builder:flatbuffers.Builder, NAMEOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(1, NAMEOffset, 0);
 }
 
-static addVersion(builder:flatbuffers.Builder, versionOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(2, versionOffset, 0);
+static addVersion(builder:flatbuffers.Builder, VERSIONOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(2, VERSIONOffset, 0);
 }
 
-static addDescription(builder:flatbuffers.Builder, descriptionOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(3, descriptionOffset, 0);
+static addDescription(builder:flatbuffers.Builder, DESCRIPTIONOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(3, DESCRIPTIONOffset, 0);
 }
 
-static addTagline(builder:flatbuffers.Builder, taglineOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(4, taglineOffset, 0);
+static addTagline(builder:flatbuffers.Builder, TAGLINEOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(4, TAGLINEOffset, 0);
 }
 
-static addPluginType(builder:flatbuffers.Builder, pluginType:pluginCategory) {
-  builder.addFieldInt8(5, pluginType, pluginCategory.Sensor);
+static addPluginType(builder:flatbuffers.Builder, PLUGIN_TYPE:pluginCategory) {
+  builder.addFieldInt8(5, PLUGIN_TYPE, pluginCategory.Sensor);
 }
 
-static addPublisherName(builder:flatbuffers.Builder, publisherNameOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(6, publisherNameOffset, 0);
+static addPublisherName(builder:flatbuffers.Builder, PUBLISHER_NAMEOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(6, PUBLISHER_NAMEOffset, 0);
 }
 
-static addPublisherHandle(builder:flatbuffers.Builder, publisherHandleOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(7, publisherHandleOffset, 0);
+static addPublisherHandle(builder:flatbuffers.Builder, PUBLISHER_HANDLEOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(7, PUBLISHER_HANDLEOffset, 0);
 }
 
-static addPublisherUrl(builder:flatbuffers.Builder, publisherUrlOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(8, publisherUrlOffset, 0);
+static addPublisherUrl(builder:flatbuffers.Builder, PUBLISHER_URLOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(8, PUBLISHER_URLOffset, 0);
 }
 
-static addSupportUrl(builder:flatbuffers.Builder, supportUrlOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(9, supportUrlOffset, 0);
+static addSupportUrl(builder:flatbuffers.Builder, SUPPORT_URLOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(9, SUPPORT_URLOffset, 0);
 }
 
-static addTags(builder:flatbuffers.Builder, tagsOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(10, tagsOffset, 0);
+static addTags(builder:flatbuffers.Builder, TAGSOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(10, TAGSOffset, 0);
 }
 
 static createTagsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
@@ -581,8 +704,8 @@ static startTagsVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(4, numElems, 4);
 }
 
-static addFeatures(builder:flatbuffers.Builder, featuresOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(11, featuresOffset, 0);
+static addFeatures(builder:flatbuffers.Builder, FEATURESOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(11, FEATURESOffset, 0);
 }
 
 static createFeaturesVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
@@ -597,8 +720,8 @@ static startFeaturesVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(4, numElems, 4);
 }
 
-static addScreenshotUrls(builder:flatbuffers.Builder, screenshotUrlsOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(12, screenshotUrlsOffset, 0);
+static addScreenshotUrls(builder:flatbuffers.Builder, SCREENSHOT_URLSOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(12, SCREENSHOT_URLSOffset, 0);
 }
 
 static createScreenshotUrlsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
@@ -613,16 +736,16 @@ static startScreenshotUrlsVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(4, numElems, 4);
 }
 
-static addBannerUrl(builder:flatbuffers.Builder, bannerUrlOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(13, bannerUrlOffset, 0);
+static addBannerUrl(builder:flatbuffers.Builder, BANNER_URLOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(13, BANNER_URLOffset, 0);
 }
 
-static addAbiVersion(builder:flatbuffers.Builder, abiVersion:number) {
-  builder.addFieldInt32(14, abiVersion, 1);
+static addAbiVersion(builder:flatbuffers.Builder, ABI_VERSION:number) {
+  builder.addFieldInt32(14, ABI_VERSION, 1);
 }
 
-static addWasmHash(builder:flatbuffers.Builder, wasmHashOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(15, wasmHashOffset, 0);
+static addWasmHash(builder:flatbuffers.Builder, WASM_HASHOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(15, WASM_HASHOffset, 0);
 }
 
 static createWasmHashVector(builder:flatbuffers.Builder, data:number[]|Uint8Array):flatbuffers.Offset {
@@ -637,16 +760,16 @@ static startWasmHashVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(1, numElems, 1);
 }
 
-static addWasmSize(builder:flatbuffers.Builder, wasmSize:bigint) {
-  builder.addFieldInt64(16, wasmSize, BigInt('0'));
+static addWasmSize(builder:flatbuffers.Builder, WASM_SIZE:bigint) {
+  builder.addFieldInt64(16, WASM_SIZE, BigInt('0'));
 }
 
-static addWasmCid(builder:flatbuffers.Builder, wasmCidOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(17, wasmCidOffset, 0);
+static addWasmCid(builder:flatbuffers.Builder, WASM_CIDOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(17, WASM_CIDOffset, 0);
 }
 
-static addEncryptedWasmHash(builder:flatbuffers.Builder, encryptedWasmHashOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(18, encryptedWasmHashOffset, 0);
+static addEncryptedWasmHash(builder:flatbuffers.Builder, ENCRYPTED_WASM_HASHOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(18, ENCRYPTED_WASM_HASHOffset, 0);
 }
 
 static createEncryptedWasmHashVector(builder:flatbuffers.Builder, data:number[]|Uint8Array):flatbuffers.Offset {
@@ -661,12 +784,12 @@ static startEncryptedWasmHashVector(builder:flatbuffers.Builder, numElems:number
   builder.startVector(1, numElems, 1);
 }
 
-static addEncryptedWasmSize(builder:flatbuffers.Builder, encryptedWasmSize:bigint) {
-  builder.addFieldInt64(19, encryptedWasmSize, BigInt('0'));
+static addEncryptedWasmSize(builder:flatbuffers.Builder, ENCRYPTED_WASM_SIZE:bigint) {
+  builder.addFieldInt64(19, ENCRYPTED_WASM_SIZE, BigInt('0'));
 }
 
-static addEntryFunctions(builder:flatbuffers.Builder, entryFunctionsOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(20, entryFunctionsOffset, 0);
+static addEntryFunctions(builder:flatbuffers.Builder, ENTRY_FUNCTIONSOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(20, ENTRY_FUNCTIONSOffset, 0);
 }
 
 static createEntryFunctionsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
@@ -681,8 +804,8 @@ static startEntryFunctionsVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(4, numElems, 4);
 }
 
-static addRequiredSchemas(builder:flatbuffers.Builder, requiredSchemasOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(21, requiredSchemasOffset, 0);
+static addRequiredSchemas(builder:flatbuffers.Builder, REQUIRED_SCHEMASOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(21, REQUIRED_SCHEMASOffset, 0);
 }
 
 static createRequiredSchemasVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
@@ -697,8 +820,8 @@ static startRequiredSchemasVector(builder:flatbuffers.Builder, numElems:number) 
   builder.startVector(4, numElems, 4);
 }
 
-static addDependencies(builder:flatbuffers.Builder, dependenciesOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(22, dependenciesOffset, 0);
+static addDependencies(builder:flatbuffers.Builder, DEPENDENCIESOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(22, DEPENDENCIESOffset, 0);
 }
 
 static createDependenciesVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
@@ -713,8 +836,8 @@ static startDependenciesVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(4, numElems, 4);
 }
 
-static addCapabilities(builder:flatbuffers.Builder, capabilitiesOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(23, capabilitiesOffset, 0);
+static addCapabilities(builder:flatbuffers.Builder, CAPABILITIESOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(23, CAPABILITIESOffset, 0);
 }
 
 static createCapabilitiesVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
@@ -729,28 +852,28 @@ static startCapabilitiesVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(4, numElems, 4);
 }
 
-static addProviderPeerId(builder:flatbuffers.Builder, providerPeerIdOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(24, providerPeerIdOffset, 0);
+static addProviderPeerId(builder:flatbuffers.Builder, PROVIDER_PEER_IDOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(24, PROVIDER_PEER_IDOffset, 0);
 }
 
-static addProviderEpmCid(builder:flatbuffers.Builder, providerEpmCidOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(25, providerEpmCidOffset, 0);
+static addProviderEpmCid(builder:flatbuffers.Builder, PROVIDER_EPM_CIDOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(25, PROVIDER_EPM_CIDOffset, 0);
 }
 
-static addEncrypted(builder:flatbuffers.Builder, encrypted:boolean) {
-  builder.addFieldInt8(26, +encrypted, +true);
+static addEncrypted(builder:flatbuffers.Builder, ENCRYPTED:boolean) {
+  builder.addFieldInt8(26, +ENCRYPTED, +true);
 }
 
-static addRequiredScope(builder:flatbuffers.Builder, requiredScopeOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(27, requiredScopeOffset, 0);
+static addRequiredScope(builder:flatbuffers.Builder, REQUIRED_SCOPEOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(27, REQUIRED_SCOPEOffset, 0);
 }
 
-static addKeyId(builder:flatbuffers.Builder, keyIdOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(28, keyIdOffset, 0);
+static addKeyId(builder:flatbuffers.Builder, KEY_IDOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(28, KEY_IDOffset, 0);
 }
 
-static addAllowedDomains(builder:flatbuffers.Builder, allowedDomainsOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(29, allowedDomainsOffset, 0);
+static addAllowedDomains(builder:flatbuffers.Builder, ALLOWED_DOMAINSOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(29, ALLOWED_DOMAINSOffset, 0);
 }
 
 static createAllowedDomainsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
@@ -765,12 +888,12 @@ static startAllowedDomainsVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(4, numElems, 4);
 }
 
-static addMaxGrantTimeoutMs(builder:flatbuffers.Builder, maxGrantTimeoutMs:bigint) {
-  builder.addFieldInt64(30, maxGrantTimeoutMs, BigInt('0'));
+static addMaxGrantTimeoutMs(builder:flatbuffers.Builder, MAX_GRANT_TIMEOUT_MS:bigint) {
+  builder.addFieldInt64(30, MAX_GRANT_TIMEOUT_MS, BigInt('0'));
 }
 
-static addMinPermissions(builder:flatbuffers.Builder, minPermissionsOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(31, minPermissionsOffset, 0);
+static addMinPermissions(builder:flatbuffers.Builder, MIN_PERMISSIONSOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(31, MIN_PERMISSIONSOffset, 0);
 }
 
 static createMinPermissionsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
@@ -785,44 +908,44 @@ static startMinPermissionsVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(4, numElems, 4);
 }
 
-static addCreatedAt(builder:flatbuffers.Builder, createdAt:bigint) {
-  builder.addFieldInt64(32, createdAt, BigInt('0'));
+static addCreatedAt(builder:flatbuffers.Builder, CREATED_AT:bigint) {
+  builder.addFieldInt64(32, CREATED_AT, BigInt('0'));
 }
 
-static addUpdatedAt(builder:flatbuffers.Builder, updatedAt:bigint) {
-  builder.addFieldInt64(33, updatedAt, BigInt('0'));
+static addUpdatedAt(builder:flatbuffers.Builder, UPDATED_AT:bigint) {
+  builder.addFieldInt64(33, UPDATED_AT, BigInt('0'));
 }
 
-static addDocumentationUrl(builder:flatbuffers.Builder, documentationUrlOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(34, documentationUrlOffset, 0);
+static addDocumentationUrl(builder:flatbuffers.Builder, DOCUMENTATION_URLOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(34, DOCUMENTATION_URLOffset, 0);
 }
 
-static addChangelogUrl(builder:flatbuffers.Builder, changelogUrlOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(35, changelogUrlOffset, 0);
+static addChangelogUrl(builder:flatbuffers.Builder, CHANGELOG_URLOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(35, CHANGELOG_URLOffset, 0);
 }
 
-static addIconUrl(builder:flatbuffers.Builder, iconUrlOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(36, iconUrlOffset, 0);
+static addIconUrl(builder:flatbuffers.Builder, ICON_URLOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(36, ICON_URLOffset, 0);
 }
 
-static addLicense(builder:flatbuffers.Builder, licenseOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(37, licenseOffset, 0);
+static addLicense(builder:flatbuffers.Builder, LICENSEOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(37, LICENSEOffset, 0);
 }
 
-static addPaymentModel(builder:flatbuffers.Builder, paymentModel:purchaseTier) {
-  builder.addFieldInt8(38, paymentModel, purchaseTier.Free);
+static addPaymentModel(builder:flatbuffers.Builder, PAYMENT_MODEL:purchaseTier) {
+  builder.addFieldInt8(38, PAYMENT_MODEL, purchaseTier.Free);
 }
 
-static addPriceUsdCents(builder:flatbuffers.Builder, priceUsdCents:number) {
-  builder.addFieldInt32(39, priceUsdCents, 0);
+static addPriceUsdCents(builder:flatbuffers.Builder, PRICE_USD_CENTS:number) {
+  builder.addFieldInt32(39, PRICE_USD_CENTS, 0);
 }
 
-static addSubscriptionPeriodDays(builder:flatbuffers.Builder, subscriptionPeriodDays:number) {
-  builder.addFieldInt32(40, subscriptionPeriodDays, 0);
+static addSubscriptionPeriodDays(builder:flatbuffers.Builder, SUBSCRIPTION_PERIOD_DAYS:number) {
+  builder.addFieldInt32(40, SUBSCRIPTION_PERIOD_DAYS, 0);
 }
 
-static addAcceptedPaymentMethods(builder:flatbuffers.Builder, acceptedPaymentMethodsOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(41, acceptedPaymentMethodsOffset, 0);
+static addAcceptedPaymentMethods(builder:flatbuffers.Builder, ACCEPTED_PAYMENT_METHODSOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(41, ACCEPTED_PAYMENT_METHODSOffset, 0);
 }
 
 static createAcceptedPaymentMethodsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
@@ -837,12 +960,12 @@ static startAcceptedPaymentMethodsVector(builder:flatbuffers.Builder, numElems:n
   builder.startVector(4, numElems, 4);
 }
 
-static addListingStatus(builder:flatbuffers.Builder, listingStatus:publicationState) {
-  builder.addFieldInt8(42, listingStatus, publicationState.Public);
+static addListingStatus(builder:flatbuffers.Builder, LISTING_STATUS:publicationState) {
+  builder.addFieldInt8(42, LISTING_STATUS, publicationState.Public);
 }
 
-static addSignature(builder:flatbuffers.Builder, signatureOffset:flatbuffers.Offset) {
-  builder.addFieldOffset(43, signatureOffset, 0);
+static addSignature(builder:flatbuffers.Builder, SIGNATUREOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(43, SIGNATUREOffset, 0);
 }
 
 static createSignatureVector(builder:flatbuffers.Builder, data:number[]|Uint8Array):flatbuffers.Offset {
@@ -855,6 +978,134 @@ static createSignatureVector(builder:flatbuffers.Builder, data:number[]|Uint8Arr
 
 static startSignatureVector(builder:flatbuffers.Builder, numElems:number) {
   builder.startVector(1, numElems, 1);
+}
+
+static addInvokeSurfaces(builder:flatbuffers.Builder, INVOKE_SURFACESOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(44, INVOKE_SURFACESOffset, 0);
+}
+
+static createInvokeSurfacesVector(builder:flatbuffers.Builder, data:invokeSurfaceKind[]):flatbuffers.Offset {
+  builder.startVector(1, data.length, 1);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addInt8(data[i]!);
+  }
+  return builder.endVector();
+}
+
+static startInvokeSurfacesVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(1, numElems, 1);
+}
+
+static addMethods(builder:flatbuffers.Builder, METHODSOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(45, METHODSOffset, 0);
+}
+
+static createMethodsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
+  }
+  return builder.endVector();
+}
+
+static startMethodsVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
+
+static addHostCapabilities(builder:flatbuffers.Builder, HOST_CAPABILITIESOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(46, HOST_CAPABILITIESOffset, 0);
+}
+
+static createHostCapabilitiesVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
+  }
+  return builder.endVector();
+}
+
+static startHostCapabilitiesVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
+
+static addTimers(builder:flatbuffers.Builder, TIMERSOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(47, TIMERSOffset, 0);
+}
+
+static createTimersVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
+  }
+  return builder.endVector();
+}
+
+static startTimersVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
+
+static addProtocols(builder:flatbuffers.Builder, PROTOCOLSOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(48, PROTOCOLSOffset, 0);
+}
+
+static createProtocolsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
+  }
+  return builder.endVector();
+}
+
+static startProtocolsVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
+
+static addSchemasUsed(builder:flatbuffers.Builder, SCHEMAS_USEDOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(49, SCHEMAS_USEDOffset, 0);
+}
+
+static createSchemasUsedVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
+  }
+  return builder.endVector();
+}
+
+static startSchemasUsedVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
+
+static addBuildArtifacts(builder:flatbuffers.Builder, BUILD_ARTIFACTSOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(50, BUILD_ARTIFACTSOffset, 0);
+}
+
+static createBuildArtifactsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
+  }
+  return builder.endVector();
+}
+
+static startBuildArtifactsVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
+}
+
+static addRuntimeTargets(builder:flatbuffers.Builder, RUNTIME_TARGETSOffset:flatbuffers.Offset) {
+  builder.addFieldOffset(51, RUNTIME_TARGETSOffset, 0);
+}
+
+static createRuntimeTargetsVector(builder:flatbuffers.Builder, data:flatbuffers.Offset[]):flatbuffers.Offset {
+  builder.startVector(4, data.length, 4);
+  for (let i = data.length - 1; i >= 0; i--) {
+    builder.addOffset(data[i]!);
+  }
+  return builder.endVector();
+}
+
+static startRuntimeTargetsVector(builder:flatbuffers.Builder, numElems:number) {
+  builder.startVector(4, numElems, 4);
 }
 
 static endPLG(builder:flatbuffers.Builder):flatbuffers.Offset {
@@ -873,52 +1124,329 @@ static finishSizePrefixedPLGBuffer(builder:flatbuffers.Builder, offset:flatbuffe
   builder.finish(offset, '$PLG', true);
 }
 
-static createPLG(builder:flatbuffers.Builder, pluginIdOffset:flatbuffers.Offset, nameOffset:flatbuffers.Offset, versionOffset:flatbuffers.Offset, descriptionOffset:flatbuffers.Offset, taglineOffset:flatbuffers.Offset, pluginType:pluginCategory, publisherNameOffset:flatbuffers.Offset, publisherHandleOffset:flatbuffers.Offset, publisherUrlOffset:flatbuffers.Offset, supportUrlOffset:flatbuffers.Offset, tagsOffset:flatbuffers.Offset, featuresOffset:flatbuffers.Offset, screenshotUrlsOffset:flatbuffers.Offset, bannerUrlOffset:flatbuffers.Offset, abiVersion:number, wasmHashOffset:flatbuffers.Offset, wasmSize:bigint, wasmCidOffset:flatbuffers.Offset, encryptedWasmHashOffset:flatbuffers.Offset, encryptedWasmSize:bigint, entryFunctionsOffset:flatbuffers.Offset, requiredSchemasOffset:flatbuffers.Offset, dependenciesOffset:flatbuffers.Offset, capabilitiesOffset:flatbuffers.Offset, providerPeerIdOffset:flatbuffers.Offset, providerEpmCidOffset:flatbuffers.Offset, encrypted:boolean, requiredScopeOffset:flatbuffers.Offset, keyIdOffset:flatbuffers.Offset, allowedDomainsOffset:flatbuffers.Offset, maxGrantTimeoutMs:bigint, minPermissionsOffset:flatbuffers.Offset, createdAt:bigint, updatedAt:bigint, documentationUrlOffset:flatbuffers.Offset, changelogUrlOffset:flatbuffers.Offset, iconUrlOffset:flatbuffers.Offset, licenseOffset:flatbuffers.Offset, paymentModel:purchaseTier, priceUsdCents:number, subscriptionPeriodDays:number, acceptedPaymentMethodsOffset:flatbuffers.Offset, listingStatus:publicationState, signatureOffset:flatbuffers.Offset):flatbuffers.Offset {
+static createPLG(builder:flatbuffers.Builder, PLUGIN_IDOffset:flatbuffers.Offset, NAMEOffset:flatbuffers.Offset, VERSIONOffset:flatbuffers.Offset, DESCRIPTIONOffset:flatbuffers.Offset, TAGLINEOffset:flatbuffers.Offset, PLUGIN_TYPE:pluginCategory, PUBLISHER_NAMEOffset:flatbuffers.Offset, PUBLISHER_HANDLEOffset:flatbuffers.Offset, PUBLISHER_URLOffset:flatbuffers.Offset, SUPPORT_URLOffset:flatbuffers.Offset, TAGSOffset:flatbuffers.Offset, FEATURESOffset:flatbuffers.Offset, SCREENSHOT_URLSOffset:flatbuffers.Offset, BANNER_URLOffset:flatbuffers.Offset, ABI_VERSION:number, WASM_HASHOffset:flatbuffers.Offset, WASM_SIZE:bigint, WASM_CIDOffset:flatbuffers.Offset, ENCRYPTED_WASM_HASHOffset:flatbuffers.Offset, ENCRYPTED_WASM_SIZE:bigint, ENTRY_FUNCTIONSOffset:flatbuffers.Offset, REQUIRED_SCHEMASOffset:flatbuffers.Offset, DEPENDENCIESOffset:flatbuffers.Offset, CAPABILITIESOffset:flatbuffers.Offset, PROVIDER_PEER_IDOffset:flatbuffers.Offset, PROVIDER_EPM_CIDOffset:flatbuffers.Offset, ENCRYPTED:boolean, REQUIRED_SCOPEOffset:flatbuffers.Offset, KEY_IDOffset:flatbuffers.Offset, ALLOWED_DOMAINSOffset:flatbuffers.Offset, MAX_GRANT_TIMEOUT_MS:bigint, MIN_PERMISSIONSOffset:flatbuffers.Offset, CREATED_AT:bigint, UPDATED_AT:bigint, DOCUMENTATION_URLOffset:flatbuffers.Offset, CHANGELOG_URLOffset:flatbuffers.Offset, ICON_URLOffset:flatbuffers.Offset, LICENSEOffset:flatbuffers.Offset, PAYMENT_MODEL:purchaseTier, PRICE_USD_CENTS:number, SUBSCRIPTION_PERIOD_DAYS:number, ACCEPTED_PAYMENT_METHODSOffset:flatbuffers.Offset, LISTING_STATUS:publicationState, SIGNATUREOffset:flatbuffers.Offset, INVOKE_SURFACESOffset:flatbuffers.Offset, METHODSOffset:flatbuffers.Offset, HOST_CAPABILITIESOffset:flatbuffers.Offset, TIMERSOffset:flatbuffers.Offset, PROTOCOLSOffset:flatbuffers.Offset, SCHEMAS_USEDOffset:flatbuffers.Offset, BUILD_ARTIFACTSOffset:flatbuffers.Offset, RUNTIME_TARGETSOffset:flatbuffers.Offset):flatbuffers.Offset {
   PLG.startPLG(builder);
-  PLG.addPluginId(builder, pluginIdOffset);
-  PLG.addName(builder, nameOffset);
-  PLG.addVersion(builder, versionOffset);
-  PLG.addDescription(builder, descriptionOffset);
-  PLG.addTagline(builder, taglineOffset);
-  PLG.addPluginType(builder, pluginType);
-  PLG.addPublisherName(builder, publisherNameOffset);
-  PLG.addPublisherHandle(builder, publisherHandleOffset);
-  PLG.addPublisherUrl(builder, publisherUrlOffset);
-  PLG.addSupportUrl(builder, supportUrlOffset);
-  PLG.addTags(builder, tagsOffset);
-  PLG.addFeatures(builder, featuresOffset);
-  PLG.addScreenshotUrls(builder, screenshotUrlsOffset);
-  PLG.addBannerUrl(builder, bannerUrlOffset);
-  PLG.addAbiVersion(builder, abiVersion);
-  PLG.addWasmHash(builder, wasmHashOffset);
-  PLG.addWasmSize(builder, wasmSize);
-  PLG.addWasmCid(builder, wasmCidOffset);
-  PLG.addEncryptedWasmHash(builder, encryptedWasmHashOffset);
-  PLG.addEncryptedWasmSize(builder, encryptedWasmSize);
-  PLG.addEntryFunctions(builder, entryFunctionsOffset);
-  PLG.addRequiredSchemas(builder, requiredSchemasOffset);
-  PLG.addDependencies(builder, dependenciesOffset);
-  PLG.addCapabilities(builder, capabilitiesOffset);
-  PLG.addProviderPeerId(builder, providerPeerIdOffset);
-  PLG.addProviderEpmCid(builder, providerEpmCidOffset);
-  PLG.addEncrypted(builder, encrypted);
-  PLG.addRequiredScope(builder, requiredScopeOffset);
-  PLG.addKeyId(builder, keyIdOffset);
-  PLG.addAllowedDomains(builder, allowedDomainsOffset);
-  PLG.addMaxGrantTimeoutMs(builder, maxGrantTimeoutMs);
-  PLG.addMinPermissions(builder, minPermissionsOffset);
-  PLG.addCreatedAt(builder, createdAt);
-  PLG.addUpdatedAt(builder, updatedAt);
-  PLG.addDocumentationUrl(builder, documentationUrlOffset);
-  PLG.addChangelogUrl(builder, changelogUrlOffset);
-  PLG.addIconUrl(builder, iconUrlOffset);
-  PLG.addLicense(builder, licenseOffset);
-  PLG.addPaymentModel(builder, paymentModel);
-  PLG.addPriceUsdCents(builder, priceUsdCents);
-  PLG.addSubscriptionPeriodDays(builder, subscriptionPeriodDays);
-  PLG.addAcceptedPaymentMethods(builder, acceptedPaymentMethodsOffset);
-  PLG.addListingStatus(builder, listingStatus);
-  PLG.addSignature(builder, signatureOffset);
+  PLG.addPluginId(builder, PLUGIN_IDOffset);
+  PLG.addName(builder, NAMEOffset);
+  PLG.addVersion(builder, VERSIONOffset);
+  PLG.addDescription(builder, DESCRIPTIONOffset);
+  PLG.addTagline(builder, TAGLINEOffset);
+  PLG.addPluginType(builder, PLUGIN_TYPE);
+  PLG.addPublisherName(builder, PUBLISHER_NAMEOffset);
+  PLG.addPublisherHandle(builder, PUBLISHER_HANDLEOffset);
+  PLG.addPublisherUrl(builder, PUBLISHER_URLOffset);
+  PLG.addSupportUrl(builder, SUPPORT_URLOffset);
+  PLG.addTags(builder, TAGSOffset);
+  PLG.addFeatures(builder, FEATURESOffset);
+  PLG.addScreenshotUrls(builder, SCREENSHOT_URLSOffset);
+  PLG.addBannerUrl(builder, BANNER_URLOffset);
+  PLG.addAbiVersion(builder, ABI_VERSION);
+  PLG.addWasmHash(builder, WASM_HASHOffset);
+  PLG.addWasmSize(builder, WASM_SIZE);
+  PLG.addWasmCid(builder, WASM_CIDOffset);
+  PLG.addEncryptedWasmHash(builder, ENCRYPTED_WASM_HASHOffset);
+  PLG.addEncryptedWasmSize(builder, ENCRYPTED_WASM_SIZE);
+  PLG.addEntryFunctions(builder, ENTRY_FUNCTIONSOffset);
+  PLG.addRequiredSchemas(builder, REQUIRED_SCHEMASOffset);
+  PLG.addDependencies(builder, DEPENDENCIESOffset);
+  PLG.addCapabilities(builder, CAPABILITIESOffset);
+  PLG.addProviderPeerId(builder, PROVIDER_PEER_IDOffset);
+  PLG.addProviderEpmCid(builder, PROVIDER_EPM_CIDOffset);
+  PLG.addEncrypted(builder, ENCRYPTED);
+  PLG.addRequiredScope(builder, REQUIRED_SCOPEOffset);
+  PLG.addKeyId(builder, KEY_IDOffset);
+  PLG.addAllowedDomains(builder, ALLOWED_DOMAINSOffset);
+  PLG.addMaxGrantTimeoutMs(builder, MAX_GRANT_TIMEOUT_MS);
+  PLG.addMinPermissions(builder, MIN_PERMISSIONSOffset);
+  PLG.addCreatedAt(builder, CREATED_AT);
+  PLG.addUpdatedAt(builder, UPDATED_AT);
+  PLG.addDocumentationUrl(builder, DOCUMENTATION_URLOffset);
+  PLG.addChangelogUrl(builder, CHANGELOG_URLOffset);
+  PLG.addIconUrl(builder, ICON_URLOffset);
+  PLG.addLicense(builder, LICENSEOffset);
+  PLG.addPaymentModel(builder, PAYMENT_MODEL);
+  PLG.addPriceUsdCents(builder, PRICE_USD_CENTS);
+  PLG.addSubscriptionPeriodDays(builder, SUBSCRIPTION_PERIOD_DAYS);
+  PLG.addAcceptedPaymentMethods(builder, ACCEPTED_PAYMENT_METHODSOffset);
+  PLG.addListingStatus(builder, LISTING_STATUS);
+  PLG.addSignature(builder, SIGNATUREOffset);
+  PLG.addInvokeSurfaces(builder, INVOKE_SURFACESOffset);
+  PLG.addMethods(builder, METHODSOffset);
+  PLG.addHostCapabilities(builder, HOST_CAPABILITIESOffset);
+  PLG.addTimers(builder, TIMERSOffset);
+  PLG.addProtocols(builder, PROTOCOLSOffset);
+  PLG.addSchemasUsed(builder, SCHEMAS_USEDOffset);
+  PLG.addBuildArtifacts(builder, BUILD_ARTIFACTSOffset);
+  PLG.addRuntimeTargets(builder, RUNTIME_TARGETSOffset);
   return PLG.endPLG(builder);
+}
+
+unpack(): PLGT {
+  return new PLGT(
+    this.PLUGIN_ID(),
+    this.NAME(),
+    this.VERSION(),
+    this.DESCRIPTION(),
+    this.TAGLINE(),
+    this.PLUGIN_TYPE(),
+    this.PUBLISHER_NAME(),
+    this.PUBLISHER_HANDLE(),
+    this.PUBLISHER_URL(),
+    this.SUPPORT_URL(),
+    this.bb!.createScalarList<string>(this.TAGS.bind(this), this.tagsLength()),
+    this.bb!.createScalarList<string>(this.FEATURES.bind(this), this.featuresLength()),
+    this.bb!.createScalarList<string>(this.SCREENSHOT_URLS.bind(this), this.screenshotUrlsLength()),
+    this.BANNER_URL(),
+    this.ABI_VERSION(),
+    this.bb!.createScalarList<number>(this.WASM_HASH.bind(this), this.wasmHashLength()),
+    this.WASM_SIZE(),
+    this.WASM_CID(),
+    this.bb!.createScalarList<number>(this.ENCRYPTED_WASM_HASH.bind(this), this.encryptedWasmHashLength()),
+    this.ENCRYPTED_WASM_SIZE(),
+    this.bb!.createObjList<EntryFunction, EntryFunctionT>(this.ENTRY_FUNCTIONS.bind(this), this.entryFunctionsLength()),
+    this.bb!.createScalarList<string>(this.REQUIRED_SCHEMAS.bind(this), this.requiredSchemasLength()),
+    this.bb!.createObjList<PluginDependency, PluginDependencyT>(this.DEPENDENCIES.bind(this), this.dependenciesLength()),
+    this.bb!.createObjList<PluginCapability, PluginCapabilityT>(this.CAPABILITIES.bind(this), this.capabilitiesLength()),
+    this.PROVIDER_PEER_ID(),
+    this.PROVIDER_EPM_CID(),
+    this.ENCRYPTED(),
+    this.REQUIRED_SCOPE(),
+    this.KEY_ID(),
+    this.bb!.createScalarList<string>(this.ALLOWED_DOMAINS.bind(this), this.allowedDomainsLength()),
+    this.MAX_GRANT_TIMEOUT_MS(),
+    this.bb!.createScalarList<string>(this.MIN_PERMISSIONS.bind(this), this.minPermissionsLength()),
+    this.CREATED_AT(),
+    this.UPDATED_AT(),
+    this.DOCUMENTATION_URL(),
+    this.CHANGELOG_URL(),
+    this.ICON_URL(),
+    this.LICENSE(),
+    this.PAYMENT_MODEL(),
+    this.PRICE_USD_CENTS(),
+    this.SUBSCRIPTION_PERIOD_DAYS(),
+    this.bb!.createScalarList<string>(this.ACCEPTED_PAYMENT_METHODS.bind(this), this.acceptedPaymentMethodsLength()),
+    this.LISTING_STATUS(),
+    this.bb!.createScalarList<number>(this.SIGNATURE.bind(this), this.signatureLength()),
+    this.bb!.createScalarList<invokeSurfaceKind>(this.INVOKE_SURFACES.bind(this), this.invokeSurfacesLength()),
+    this.bb!.createObjList<PLGMethodManifest, PLGMethodManifestT>(this.METHODS.bind(this), this.methodsLength()),
+    this.bb!.createObjList<PLGHostCapability, PLGHostCapabilityT>(this.HOST_CAPABILITIES.bind(this), this.hostCapabilitiesLength()),
+    this.bb!.createObjList<PLGTimerSpec, PLGTimerSpecT>(this.TIMERS.bind(this), this.timersLength()),
+    this.bb!.createObjList<PLGProtocolSpec, PLGProtocolSpecT>(this.PROTOCOLS.bind(this), this.protocolsLength()),
+    this.bb!.createObjList<FlatBufferTypeRef, FlatBufferTypeRefT>(this.SCHEMAS_USED.bind(this), this.schemasUsedLength()),
+    this.bb!.createObjList<PLGBuildArtifact, PLGBuildArtifactT>(this.BUILD_ARTIFACTS.bind(this), this.buildArtifactsLength()),
+    this.bb!.createScalarList<string>(this.RUNTIME_TARGETS.bind(this), this.runtimeTargetsLength())
+  );
+}
+
+
+unpackTo(_o: PLGT): void {
+  _o.PLUGIN_ID = this.PLUGIN_ID();
+  _o.NAME = this.NAME();
+  _o.VERSION = this.VERSION();
+  _o.DESCRIPTION = this.DESCRIPTION();
+  _o.TAGLINE = this.TAGLINE();
+  _o.PLUGIN_TYPE = this.PLUGIN_TYPE();
+  _o.PUBLISHER_NAME = this.PUBLISHER_NAME();
+  _o.PUBLISHER_HANDLE = this.PUBLISHER_HANDLE();
+  _o.PUBLISHER_URL = this.PUBLISHER_URL();
+  _o.SUPPORT_URL = this.SUPPORT_URL();
+  _o.TAGS = this.bb!.createScalarList<string>(this.TAGS.bind(this), this.tagsLength());
+  _o.FEATURES = this.bb!.createScalarList<string>(this.FEATURES.bind(this), this.featuresLength());
+  _o.SCREENSHOT_URLS = this.bb!.createScalarList<string>(this.SCREENSHOT_URLS.bind(this), this.screenshotUrlsLength());
+  _o.BANNER_URL = this.BANNER_URL();
+  _o.ABI_VERSION = this.ABI_VERSION();
+  _o.WASM_HASH = this.bb!.createScalarList<number>(this.WASM_HASH.bind(this), this.wasmHashLength());
+  _o.WASM_SIZE = this.WASM_SIZE();
+  _o.WASM_CID = this.WASM_CID();
+  _o.ENCRYPTED_WASM_HASH = this.bb!.createScalarList<number>(this.ENCRYPTED_WASM_HASH.bind(this), this.encryptedWasmHashLength());
+  _o.ENCRYPTED_WASM_SIZE = this.ENCRYPTED_WASM_SIZE();
+  _o.ENTRY_FUNCTIONS = this.bb!.createObjList<EntryFunction, EntryFunctionT>(this.ENTRY_FUNCTIONS.bind(this), this.entryFunctionsLength());
+  _o.REQUIRED_SCHEMAS = this.bb!.createScalarList<string>(this.REQUIRED_SCHEMAS.bind(this), this.requiredSchemasLength());
+  _o.DEPENDENCIES = this.bb!.createObjList<PluginDependency, PluginDependencyT>(this.DEPENDENCIES.bind(this), this.dependenciesLength());
+  _o.CAPABILITIES = this.bb!.createObjList<PluginCapability, PluginCapabilityT>(this.CAPABILITIES.bind(this), this.capabilitiesLength());
+  _o.PROVIDER_PEER_ID = this.PROVIDER_PEER_ID();
+  _o.PROVIDER_EPM_CID = this.PROVIDER_EPM_CID();
+  _o.ENCRYPTED = this.ENCRYPTED();
+  _o.REQUIRED_SCOPE = this.REQUIRED_SCOPE();
+  _o.KEY_ID = this.KEY_ID();
+  _o.ALLOWED_DOMAINS = this.bb!.createScalarList<string>(this.ALLOWED_DOMAINS.bind(this), this.allowedDomainsLength());
+  _o.MAX_GRANT_TIMEOUT_MS = this.MAX_GRANT_TIMEOUT_MS();
+  _o.MIN_PERMISSIONS = this.bb!.createScalarList<string>(this.MIN_PERMISSIONS.bind(this), this.minPermissionsLength());
+  _o.CREATED_AT = this.CREATED_AT();
+  _o.UPDATED_AT = this.UPDATED_AT();
+  _o.DOCUMENTATION_URL = this.DOCUMENTATION_URL();
+  _o.CHANGELOG_URL = this.CHANGELOG_URL();
+  _o.ICON_URL = this.ICON_URL();
+  _o.LICENSE = this.LICENSE();
+  _o.PAYMENT_MODEL = this.PAYMENT_MODEL();
+  _o.PRICE_USD_CENTS = this.PRICE_USD_CENTS();
+  _o.SUBSCRIPTION_PERIOD_DAYS = this.SUBSCRIPTION_PERIOD_DAYS();
+  _o.ACCEPTED_PAYMENT_METHODS = this.bb!.createScalarList<string>(this.ACCEPTED_PAYMENT_METHODS.bind(this), this.acceptedPaymentMethodsLength());
+  _o.LISTING_STATUS = this.LISTING_STATUS();
+  _o.SIGNATURE = this.bb!.createScalarList<number>(this.SIGNATURE.bind(this), this.signatureLength());
+  _o.INVOKE_SURFACES = this.bb!.createScalarList<invokeSurfaceKind>(this.INVOKE_SURFACES.bind(this), this.invokeSurfacesLength());
+  _o.METHODS = this.bb!.createObjList<PLGMethodManifest, PLGMethodManifestT>(this.METHODS.bind(this), this.methodsLength());
+  _o.HOST_CAPABILITIES = this.bb!.createObjList<PLGHostCapability, PLGHostCapabilityT>(this.HOST_CAPABILITIES.bind(this), this.hostCapabilitiesLength());
+  _o.TIMERS = this.bb!.createObjList<PLGTimerSpec, PLGTimerSpecT>(this.TIMERS.bind(this), this.timersLength());
+  _o.PROTOCOLS = this.bb!.createObjList<PLGProtocolSpec, PLGProtocolSpecT>(this.PROTOCOLS.bind(this), this.protocolsLength());
+  _o.SCHEMAS_USED = this.bb!.createObjList<FlatBufferTypeRef, FlatBufferTypeRefT>(this.SCHEMAS_USED.bind(this), this.schemasUsedLength());
+  _o.BUILD_ARTIFACTS = this.bb!.createObjList<PLGBuildArtifact, PLGBuildArtifactT>(this.BUILD_ARTIFACTS.bind(this), this.buildArtifactsLength());
+  _o.RUNTIME_TARGETS = this.bb!.createScalarList<string>(this.RUNTIME_TARGETS.bind(this), this.runtimeTargetsLength());
+}
+}
+
+export class PLGT implements flatbuffers.IGeneratedObject {
+constructor(
+  public PLUGIN_ID: string|Uint8Array|null = null,
+  public NAME: string|Uint8Array|null = null,
+  public VERSION: string|Uint8Array|null = null,
+  public DESCRIPTION: string|Uint8Array|null = null,
+  public TAGLINE: string|Uint8Array|null = null,
+  public PLUGIN_TYPE: pluginCategory = pluginCategory.Sensor,
+  public PUBLISHER_NAME: string|Uint8Array|null = null,
+  public PUBLISHER_HANDLE: string|Uint8Array|null = null,
+  public PUBLISHER_URL: string|Uint8Array|null = null,
+  public SUPPORT_URL: string|Uint8Array|null = null,
+  public TAGS: (string)[] = [],
+  public FEATURES: (string)[] = [],
+  public SCREENSHOT_URLS: (string)[] = [],
+  public BANNER_URL: string|Uint8Array|null = null,
+  public ABI_VERSION: number = 1,
+  public WASM_HASH: (number)[] = [],
+  public WASM_SIZE: bigint = BigInt('0'),
+  public WASM_CID: string|Uint8Array|null = null,
+  public ENCRYPTED_WASM_HASH: (number)[] = [],
+  public ENCRYPTED_WASM_SIZE: bigint = BigInt('0'),
+  public ENTRY_FUNCTIONS: (EntryFunctionT)[] = [],
+  public REQUIRED_SCHEMAS: (string)[] = [],
+  public DEPENDENCIES: (PluginDependencyT)[] = [],
+  public CAPABILITIES: (PluginCapabilityT)[] = [],
+  public PROVIDER_PEER_ID: string|Uint8Array|null = null,
+  public PROVIDER_EPM_CID: string|Uint8Array|null = null,
+  public ENCRYPTED: boolean = true,
+  public REQUIRED_SCOPE: string|Uint8Array|null = null,
+  public KEY_ID: string|Uint8Array|null = null,
+  public ALLOWED_DOMAINS: (string)[] = [],
+  public MAX_GRANT_TIMEOUT_MS: bigint = BigInt('0'),
+  public MIN_PERMISSIONS: (string)[] = [],
+  public CREATED_AT: bigint = BigInt('0'),
+  public UPDATED_AT: bigint = BigInt('0'),
+  public DOCUMENTATION_URL: string|Uint8Array|null = null,
+  public CHANGELOG_URL: string|Uint8Array|null = null,
+  public ICON_URL: string|Uint8Array|null = null,
+  public LICENSE: string|Uint8Array|null = null,
+  public PAYMENT_MODEL: purchaseTier = purchaseTier.Free,
+  public PRICE_USD_CENTS: number = 0,
+  public SUBSCRIPTION_PERIOD_DAYS: number = 0,
+  public ACCEPTED_PAYMENT_METHODS: (string)[] = [],
+  public LISTING_STATUS: publicationState = publicationState.Public,
+  public SIGNATURE: (number)[] = [],
+  public INVOKE_SURFACES: (invokeSurfaceKind)[] = [],
+  public METHODS: (PLGMethodManifestT)[] = [],
+  public HOST_CAPABILITIES: (PLGHostCapabilityT)[] = [],
+  public TIMERS: (PLGTimerSpecT)[] = [],
+  public PROTOCOLS: (PLGProtocolSpecT)[] = [],
+  public SCHEMAS_USED: (FlatBufferTypeRefT)[] = [],
+  public BUILD_ARTIFACTS: (PLGBuildArtifactT)[] = [],
+  public RUNTIME_TARGETS: (string)[] = []
+){}
+
+
+pack(builder:flatbuffers.Builder): flatbuffers.Offset {
+  const PLUGIN_ID = (this.PLUGIN_ID !== null ? builder.createString(this.PLUGIN_ID!) : 0);
+  const NAME = (this.NAME !== null ? builder.createString(this.NAME!) : 0);
+  const VERSION = (this.VERSION !== null ? builder.createString(this.VERSION!) : 0);
+  const DESCRIPTION = (this.DESCRIPTION !== null ? builder.createString(this.DESCRIPTION!) : 0);
+  const TAGLINE = (this.TAGLINE !== null ? builder.createString(this.TAGLINE!) : 0);
+  const PUBLISHER_NAME = (this.PUBLISHER_NAME !== null ? builder.createString(this.PUBLISHER_NAME!) : 0);
+  const PUBLISHER_HANDLE = (this.PUBLISHER_HANDLE !== null ? builder.createString(this.PUBLISHER_HANDLE!) : 0);
+  const PUBLISHER_URL = (this.PUBLISHER_URL !== null ? builder.createString(this.PUBLISHER_URL!) : 0);
+  const SUPPORT_URL = (this.SUPPORT_URL !== null ? builder.createString(this.SUPPORT_URL!) : 0);
+  const TAGS = PLG.createTagsVector(builder, builder.createObjectOffsetList(this.TAGS));
+  const FEATURES = PLG.createFeaturesVector(builder, builder.createObjectOffsetList(this.FEATURES));
+  const SCREENSHOT_URLS = PLG.createScreenshotUrlsVector(builder, builder.createObjectOffsetList(this.SCREENSHOT_URLS));
+  const BANNER_URL = (this.BANNER_URL !== null ? builder.createString(this.BANNER_URL!) : 0);
+  const WASM_HASH = PLG.createWasmHashVector(builder, this.WASM_HASH);
+  const WASM_CID = (this.WASM_CID !== null ? builder.createString(this.WASM_CID!) : 0);
+  const ENCRYPTED_WASM_HASH = PLG.createEncryptedWasmHashVector(builder, this.ENCRYPTED_WASM_HASH);
+  const ENTRY_FUNCTIONS = PLG.createEntryFunctionsVector(builder, builder.createObjectOffsetList(this.ENTRY_FUNCTIONS));
+  const REQUIRED_SCHEMAS = PLG.createRequiredSchemasVector(builder, builder.createObjectOffsetList(this.REQUIRED_SCHEMAS));
+  const DEPENDENCIES = PLG.createDependenciesVector(builder, builder.createObjectOffsetList(this.DEPENDENCIES));
+  const CAPABILITIES = PLG.createCapabilitiesVector(builder, builder.createObjectOffsetList(this.CAPABILITIES));
+  const PROVIDER_PEER_ID = (this.PROVIDER_PEER_ID !== null ? builder.createString(this.PROVIDER_PEER_ID!) : 0);
+  const PROVIDER_EPM_CID = (this.PROVIDER_EPM_CID !== null ? builder.createString(this.PROVIDER_EPM_CID!) : 0);
+  const REQUIRED_SCOPE = (this.REQUIRED_SCOPE !== null ? builder.createString(this.REQUIRED_SCOPE!) : 0);
+  const KEY_ID = (this.KEY_ID !== null ? builder.createString(this.KEY_ID!) : 0);
+  const ALLOWED_DOMAINS = PLG.createAllowedDomainsVector(builder, builder.createObjectOffsetList(this.ALLOWED_DOMAINS));
+  const MIN_PERMISSIONS = PLG.createMinPermissionsVector(builder, builder.createObjectOffsetList(this.MIN_PERMISSIONS));
+  const DOCUMENTATION_URL = (this.DOCUMENTATION_URL !== null ? builder.createString(this.DOCUMENTATION_URL!) : 0);
+  const CHANGELOG_URL = (this.CHANGELOG_URL !== null ? builder.createString(this.CHANGELOG_URL!) : 0);
+  const ICON_URL = (this.ICON_URL !== null ? builder.createString(this.ICON_URL!) : 0);
+  const LICENSE = (this.LICENSE !== null ? builder.createString(this.LICENSE!) : 0);
+  const ACCEPTED_PAYMENT_METHODS = PLG.createAcceptedPaymentMethodsVector(builder, builder.createObjectOffsetList(this.ACCEPTED_PAYMENT_METHODS));
+  const SIGNATURE = PLG.createSignatureVector(builder, this.SIGNATURE);
+  const INVOKE_SURFACES = PLG.createInvokeSurfacesVector(builder, this.INVOKE_SURFACES);
+  const METHODS = PLG.createMethodsVector(builder, builder.createObjectOffsetList(this.METHODS));
+  const HOST_CAPABILITIES = PLG.createHostCapabilitiesVector(builder, builder.createObjectOffsetList(this.HOST_CAPABILITIES));
+  const TIMERS = PLG.createTimersVector(builder, builder.createObjectOffsetList(this.TIMERS));
+  const PROTOCOLS = PLG.createProtocolsVector(builder, builder.createObjectOffsetList(this.PROTOCOLS));
+  const SCHEMAS_USED = PLG.createSchemasUsedVector(builder, builder.createObjectOffsetList(this.SCHEMAS_USED));
+  const BUILD_ARTIFACTS = PLG.createBuildArtifactsVector(builder, builder.createObjectOffsetList(this.BUILD_ARTIFACTS));
+  const RUNTIME_TARGETS = PLG.createRuntimeTargetsVector(builder, builder.createObjectOffsetList(this.RUNTIME_TARGETS));
+
+  return PLG.createPLG(builder,
+    PLUGIN_ID,
+    NAME,
+    VERSION,
+    DESCRIPTION,
+    TAGLINE,
+    this.PLUGIN_TYPE,
+    PUBLISHER_NAME,
+    PUBLISHER_HANDLE,
+    PUBLISHER_URL,
+    SUPPORT_URL,
+    TAGS,
+    FEATURES,
+    SCREENSHOT_URLS,
+    BANNER_URL,
+    this.ABI_VERSION,
+    WASM_HASH,
+    this.WASM_SIZE,
+    WASM_CID,
+    ENCRYPTED_WASM_HASH,
+    this.ENCRYPTED_WASM_SIZE,
+    ENTRY_FUNCTIONS,
+    REQUIRED_SCHEMAS,
+    DEPENDENCIES,
+    CAPABILITIES,
+    PROVIDER_PEER_ID,
+    PROVIDER_EPM_CID,
+    this.ENCRYPTED,
+    REQUIRED_SCOPE,
+    KEY_ID,
+    ALLOWED_DOMAINS,
+    this.MAX_GRANT_TIMEOUT_MS,
+    MIN_PERMISSIONS,
+    this.CREATED_AT,
+    this.UPDATED_AT,
+    DOCUMENTATION_URL,
+    CHANGELOG_URL,
+    ICON_URL,
+    LICENSE,
+    this.PAYMENT_MODEL,
+    this.PRICE_USD_CENTS,
+    this.SUBSCRIPTION_PERIOD_DAYS,
+    ACCEPTED_PAYMENT_METHODS,
+    this.LISTING_STATUS,
+    SIGNATURE,
+    INVOKE_SURFACES,
+    METHODS,
+    HOST_CAPABILITIES,
+    TIMERS,
+    PROTOCOLS,
+    SCHEMAS_USED,
+    BUILD_ARTIFACTS,
+    RUNTIME_TARGETS
+  );
 }
 }

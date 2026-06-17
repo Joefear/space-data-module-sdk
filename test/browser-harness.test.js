@@ -110,8 +110,9 @@ test("browser+wasmedge runtime targets default to a shared single-thread artifac
 });
 
 test("browser harness executes command-surface invoke envelopes for the shared artifact", async (t) => {
+  const manifest = createInvokeManifest();
   const compilation = await compileModuleFromSource({
-    manifest: createInvokeManifest(),
+    manifest,
     sourceCode: createEchoSource(),
     language: "c",
   });
@@ -121,6 +122,7 @@ test("browser harness executes command-surface invoke envelopes for the shared a
 
   const harness = await createBrowserModuleHarness({
     wasmSource: compilation.wasmBytes,
+    manifest,
   });
   t.after(() => {
     harness.destroy();
@@ -140,6 +142,7 @@ test("browser harness executes command-surface invoke envelopes for the shared a
     ],
   });
 
+  assert.equal(harness.runtime.surface, "command");
   assert.equal(response.statusCode, 0);
   assert.equal(response.outputs.length, 1);
   assert.equal(response.outputs[0].portId, "response");

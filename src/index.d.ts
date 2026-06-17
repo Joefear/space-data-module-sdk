@@ -158,6 +158,7 @@ export interface InvokeFrame {
   ownership?: number | string;
   generation?: number;
   mutability?: number | string;
+  frameId?: bigint | number | string;
   traceId?: bigint | number | string;
   streamId?: number;
   sequence?: bigint | number | string;
@@ -170,10 +171,13 @@ export interface PluginInvokeRequestEnvelope {
   inputs?: InvokeFrame[];
   inputFrames?: InvokeFrame[];
   payloadArena?: Uint8Array;
+  traceId?: bigint | number | string;
+  outputStreamCap?: number;
 }
 
 export interface PluginInvokeResponseEnvelope {
   statusCode?: number;
+  status?: number;
   yielded?: boolean;
   backlogRemaining?: number;
   outputs?: InvokeFrame[];
@@ -181,6 +185,21 @@ export interface PluginInvokeResponseEnvelope {
   payloadArena?: Uint8Array;
   errorCode?: string | null;
   errorMessage?: string | null;
+  traceId?: bigint | number | string;
+}
+
+export interface DecodedPluginInvokeRequestEnvelope
+  extends PluginInvokeRequestEnvelope {
+  envelope: "PIV" | "PINQ";
+}
+
+export interface DecodedPluginInvokeResponseEnvelope
+  extends PluginInvokeResponseEnvelope {
+  envelope: "PIV" | "PINS";
+}
+
+export interface DecodePluginInvokeEnvelopeOptions {
+  externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
 }
 
 export function encodePluginInvokeRequest(
@@ -188,13 +207,34 @@ export function encodePluginInvokeRequest(
 ): Uint8Array;
 export function decodePluginInvokeRequest(
   data: Uint8Array | ArrayBuffer | ArrayBufferView,
-): PluginInvokeRequestEnvelope;
+  options?: DecodePluginInvokeEnvelopeOptions,
+): DecodedPluginInvokeRequestEnvelope;
 export function encodePluginInvokeResponse(
   response: PluginInvokeResponseEnvelope,
 ): Uint8Array;
 export function decodePluginInvokeResponse(
   data: Uint8Array | ArrayBuffer | ArrayBufferView,
+  options?: DecodePluginInvokeEnvelopeOptions,
+): DecodedPluginInvokeResponseEnvelope;
+export function encodeLegacyPluginInvokeRequest(
+  request: PluginInvokeRequestEnvelope,
+): Uint8Array;
+export function decodeLegacyPluginInvokeRequest(
+  data: Uint8Array | ArrayBuffer | ArrayBufferView,
+): PluginInvokeRequestEnvelope;
+export function encodeLegacyPluginInvokeResponse(
+  response: PluginInvokeResponseEnvelope,
+): Uint8Array;
+export function decodeLegacyPluginInvokeResponse(
+  data: Uint8Array | ArrayBuffer | ArrayBufferView,
 ): PluginInvokeResponseEnvelope;
+
+export {
+  PluginInvokeRequest as LegacyPluginInvokeRequest,
+  PluginInvokeRequestT as LegacyPluginInvokeRequestT,
+  PluginInvokeResponse as LegacyPluginInvokeResponse,
+  PluginInvokeResponseT as LegacyPluginInvokeResponseT,
+} from "./generated/orbpro/invoke.js";
 export function normalizeInvokeSurfaceName(
   value: InvokeSurface | number | string | null | undefined,
 ): InvokeSurface | null;
@@ -1781,14 +1821,20 @@ export function detectArtifactProfile(wasmModule: WebAssembly.Module): string;
 export function createBrowserModuleHarness(options?: {
   wasmSource: Uint8Array | ArrayBuffer | string | WebAssembly.Module | unknown;
   host?: BrowserHost | RuntimeHost | Record<string, unknown>;
-  hostOptions?: BrowserHostOptions;
-  args?: string[];
-  env?: Record<string, string>;
-  surface?: "direct" | "command";
-  performance?: {
-    now(): number;
-    timeOrigin: number;
-  };
+	  hostOptions?: BrowserHostOptions;
+	  args?: string[];
+	  env?: Record<string, string>;
+	  manifest?: PluginManifest | Record<string, unknown>;
+	  surface?: "direct" | "command";
+	  wasmMemory?: WebAssembly.Memory;
+	  memory?: WebAssembly.Memory;
+	  sharedMemory?: boolean;
+	  initialMemoryBytes?: number;
+	  maximumMemoryBytes?: number;
+	  performance?: {
+	    now(): number;
+	    timeOrigin: number;
+	  };
   logOutput?: boolean;
 }): Promise<BrowserModuleHarness>;
 export interface ModuleFlatBufferStreamPumpStats {

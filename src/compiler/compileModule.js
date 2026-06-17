@@ -48,8 +48,10 @@ import {
   SDS_GUEST_LINK_METADATA_ENTRY_ID,
   SDS_GUEST_LINK_OBJECT_ENTRY_ID,
   SDS_GUEST_LINK_SECTION_NAME,
+  SDS_MANIFEST_SECTION_NAME,
 } from "../bundle/constants.js";
 import {
+  appendWasmCustomSection,
   decodeUnsignedLeb128,
   parseWasmModuleSections,
 } from "../bundle/wasm.js";
@@ -795,8 +797,13 @@ export async function compileModuleFromSource(options = {}) {
     outputPath: options.outputPath,
     compileOptions,
   });
-  wasmBytes = result.wasmBytes;
+  wasmBytes = appendWasmCustomSection(
+    result.wasmBytes,
+    SDS_MANIFEST_SECTION_NAME,
+    encodePluginManifest(manifest),
+  );
   resolvedOutputPath = result.outputPath;
+  await writeFile(resolvedOutputPath, wasmBytes);
   tempDir = result.tempDir;
 
   // Validate the compiled artifact
