@@ -5,7 +5,7 @@ import {
   encodePlgManifest,
   isPlgManifestBuffer,
   legacyManifestToPlg,
-} from "../manifest/index.js";
+} from "../manifest/browser.js";
 import { toUint8Array } from "../runtime/bufferLike.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex } from "../utils/encoding.js";
