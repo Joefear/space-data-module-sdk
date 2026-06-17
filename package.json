@@ -44,6 +44,10 @@
     "./host/wasi-shim": "./src/host/wasiShim.js",
     "./host/isomorphic": "./src/host/isomorphicLoader.js",
     "./testing/browser": "./src/testing/browserModuleHarness.js",
+    "./testing/module-flatbuffer-stream-pump": {
+      "types": "./src/index.d.ts",
+      "default": "./src/testing/moduleFlatbufferStreamPump.js"
+    },
     "./testing": "./src/testing/index.js",
     "./standards": "./src/standards/index.js",
     "./utils/wasm-crypto": "./src/utils/wasmCrypto.js",
