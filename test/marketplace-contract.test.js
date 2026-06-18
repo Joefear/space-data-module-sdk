@@ -89,7 +89,7 @@ test("marketplace grants require a provider signature over the unsigned LGR byte
     encryptedHash: new Uint8Array(32).fill(0x42),
     contentKeyId: "dataset:celestrak:full-catalog:2026-05-05",
     recipientKeyId: "member-alpha-key",
-    providerSignature: null,
+    providerSignature: new Uint8Array(64),
   }));
   const unsignedGrantBytes = encodeUnsignedLicensingGrantForProviderSignature(unsignedGrant);
   const signedGrant = validateLicensingGrant(

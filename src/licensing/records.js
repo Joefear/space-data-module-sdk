@@ -17,6 +17,8 @@ import {
 } from "spacedatastandards.org/lib/js/LGR/main.js";
 import { LPF, licensingProofMessageType } from "spacedatastandards.org/lib/js/LPF/main.js";
 
+const PROVIDER_SIGNATURE_LENGTH = 64;
+
 export class LicensingProtocolError extends Error {
   constructor(code, message) {
     super(message);
@@ -451,7 +453,7 @@ export function encodeUnsignedLicensingGrantForProviderSignature(grant) {
         "expected granted licensing record",
       );
     }
-    return encodeUnsignedGrantFromRawRoot(root, rawBytes.length);
+    return encodeUnsignedGrantFromRawRoot(root, rawBytes);
   }
 
   return encodeUnsignedGrantFromDecodedMessage(grant);
@@ -459,10 +461,10 @@ export function encodeUnsignedLicensingGrantForProviderSignature(grant) {
 
 export async function verifyLicensingGrantProviderSignature(grant, options = {}) {
   const providerSignature = cloneOptionalBytes(grant?.providerSignature);
-  if (providerSignature.length !== 64) {
+  if (providerSignature.length !== PROVIDER_SIGNATURE_LENGTH) {
     throw new LicensingProtocolError(
       "invalid_grant",
-      "licensing grant provider signature must be 64 bytes",
+      `licensing grant provider signature must be ${PROVIDER_SIGNATURE_LENGTH} bytes`,
     );
   }
   if (providerSignature.every((byte) => byte === 0)) {
@@ -523,63 +525,19 @@ export function extractGrantModuleDescriptor(grant) {
   return grant.moduleDescriptor;
 }
 
-function encodeUnsignedGrantFromRawRoot(root, bufferLength) {
-  const builder = new flatbuffers.Builder(Math.max(2048, bufferLength));
-  const requestIdOffset = builder.createString(root.REQUEST_ID() || "");
-  const moduleIdOffset = builder.createString(root.MODULE_ID() || "");
-  const moduleVersionOffset = createOptionalString(builder, root.MODULE_VERSION());
-  const requesterPeerIdOffset = createOptionalString(builder, root.REQUESTER_PEER_ID());
-  const requesterXpubOffset = createOptionalString(builder, root.REQUESTER_XPUB());
-  const requestedDomainOffset = createOptionalString(builder, root.REQUESTED_DOMAIN());
-  const grantedDomainOffset = createOptionalString(builder, root.GRANTED_DOMAIN());
-  const requiredScopeOffset = createOptionalString(builder, root.REQUIRED_SCOPE());
-  const grantStatusOffset = createOptionalString(builder, root.GRANT_STATUS());
-  const denialReasonOffset = createOptionalString(builder, root.DENIAL_REASON());
-  const capabilityTokenOffset = createOptionalVector(
-    builder,
-    LGR.createCapabilityTokenVector,
-    root.capabilityTokenArray(),
-  );
-  const moduleDescriptorOffset = root.MODULE_DESCRIPTOR()
-    ? root.MODULE_DESCRIPTOR().unpack().pack(builder)
-    : 0;
-  const wrappedHeaderOffset = root.WRAPPED_CONTENT_KEY_HEADER()
-    ? root.WRAPPED_CONTENT_KEY_HEADER().unpack().pack(builder)
-    : 0;
-  const wrappedPayloadOffset = createOptionalVector(
-    builder,
-    LGR.createWrappedContentKeyPayloadVector,
-    root.wrappedContentKeyPayloadArray(),
-  );
-  const verifierPubkeyOffset = createOptionalVector(
-    builder,
-    LGR.createGrantVerifierPubkeyVector,
-    root.grantVerifierPubkeyArray(),
-  );
+function encodeUnsignedGrantFromRawRoot(root, rawBytes) {
+  const providerSignature = root.providerSignatureArray();
+  if (!providerSignature || providerSignature.length !== PROVIDER_SIGNATURE_LENGTH) {
+    throw new LicensingProtocolError(
+      "invalid_grant",
+      `licensing grant provider signature must be ${PROVIDER_SIGNATURE_LENGTH} bytes`,
+    );
+  }
 
-  LGR.startLGR(builder);
-  LGR.addMessageType(builder, licensingGrantMessageType.Granted);
-  LGR.addRequestId(builder, requestIdOffset);
-  LGR.addModuleId(builder, moduleIdOffset);
-  if (moduleVersionOffset !== 0) LGR.addModuleVersion(builder, moduleVersionOffset);
-  if (requesterPeerIdOffset !== 0) LGR.addRequesterPeerId(builder, requesterPeerIdOffset);
-  if (requesterXpubOffset !== 0) LGR.addRequesterXpub(builder, requesterXpubOffset);
-  if (requestedDomainOffset !== 0) LGR.addRequestedDomain(builder, requestedDomainOffset);
-  LGR.addRequestedTimeoutMs(builder, root.REQUESTED_TIMEOUT_MS());
-  if (grantedDomainOffset !== 0) LGR.addGrantedDomain(builder, grantedDomainOffset);
-  LGR.addGrantedTimeoutMs(builder, root.GRANTED_TIMEOUT_MS());
-  LGR.addExpiresAt(builder, root.EXPIRES_AT());
-  if (requiredScopeOffset !== 0) LGR.addRequiredScope(builder, requiredScopeOffset);
-  if (grantStatusOffset !== 0) LGR.addGrantStatus(builder, grantStatusOffset);
-  if (denialReasonOffset !== 0) LGR.addDenialReason(builder, denialReasonOffset);
-  if (capabilityTokenOffset !== 0) LGR.addCapabilityToken(builder, capabilityTokenOffset);
-  if (moduleDescriptorOffset !== 0) LGR.addModuleDescriptor(builder, moduleDescriptorOffset);
-  if (wrappedHeaderOffset !== 0) LGR.addWrappedContentKeyHeader(builder, wrappedHeaderOffset);
-  if (wrappedPayloadOffset !== 0) LGR.addWrappedContentKeyPayload(builder, wrappedPayloadOffset);
-  if (verifierPubkeyOffset !== 0) LGR.addGrantVerifierPubkey(builder, verifierPubkeyOffset);
-  const rootOffset = LGR.endLGR(builder);
-  LGR.finishLGRBuffer(builder, rootOffset);
-  return builder.asUint8Array();
+  const signingBytes = cloneBytes(rawBytes);
+  const signingRoot = LGR.getRootAsLGR(new flatbuffers.ByteBuffer(signingBytes));
+  signingRoot.providerSignatureArray().fill(0);
+  return signingBytes;
 }
 
 function encodeUnsignedGrantFromDecodedMessage(grant) {
@@ -615,6 +573,10 @@ function encodeUnsignedGrantFromDecodedMessage(grant) {
     LGR.createGrantVerifierPubkeyVector,
     grant.grantVerifierPublicKey,
   );
+  const providerSignatureOffset = LGR.createProviderSignatureVector(
+    builder,
+    new Uint8Array(PROVIDER_SIGNATURE_LENGTH),
+  );
 
   LGR.startLGR(builder);
   LGR.addMessageType(builder, licensingGrantMessageType.Granted);
@@ -636,6 +598,7 @@ function encodeUnsignedGrantFromDecodedMessage(grant) {
   if (wrappedHeaderOffset !== 0) LGR.addWrappedContentKeyHeader(builder, wrappedHeaderOffset);
   if (wrappedPayloadOffset !== 0) LGR.addWrappedContentKeyPayload(builder, wrappedPayloadOffset);
   if (verifierPubkeyOffset !== 0) LGR.addGrantVerifierPubkey(builder, verifierPubkeyOffset);
+  LGR.addProviderSignature(builder, providerSignatureOffset);
   const rootOffset = LGR.endLGR(builder);
   LGR.finishLGRBuffer(builder, rootOffset);
   return builder.asUint8Array();
