@@ -702,6 +702,35 @@ test("artifacts can be signed and encrypted for transport", async () => {
   assert.ok(protectedArtifact.encryptedEnvelope.pnmRecordBase64.length > 0);
 });
 
+test("publication protection honors fixed PNM metadata for reproducible records", async () => {
+  const manifest = createTestManifest();
+  const result = await compileModuleFromSource({
+    manifest,
+    sourceCode: "int propagate(void) { return 11; }\n",
+    language: "c",
+  });
+  const protectionOptions = {
+    manifest,
+    wasmBytes: result.wasmBytes,
+    artifactId: "reproducible-publication-record",
+    mnemonic:
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    publishTimestamp: "2026-01-02T03:04:05.006Z",
+  };
+
+  const first = await protectModuleArtifact(protectionOptions);
+  const second = await protectModuleArtifact(protectionOptions);
+
+  assert.equal(
+    first.publicationNotice.publishTimestamp,
+    protectionOptions.publishTimestamp,
+  );
+  assert.equal(
+    Buffer.from(first.publicationRecordsBytes).toString("hex"),
+    Buffer.from(second.publicationRecordsBytes).toString("hex"),
+  );
+});
+
 test("shared module and legacy OrbPro type refs resolve without warnings", async () => {
   const manifest = {
     pluginId: "com.digitalarsenal.examples.type-registry",

@@ -911,6 +911,10 @@ export async function protectModuleArtifact(options = {}) {
     manifestHashHex,
     authorization: signedAuthorization,
   };
+  const publicationNoticeOptions = {
+    publishTimestamp: options.publishTimestamp,
+    publishTimestampMs: options.publishTimestampMs,
+  };
 
   let singleFileBundle = null;
   let singleFileBundleRecords = null;
@@ -947,6 +951,7 @@ export async function protectModuleArtifact(options = {}) {
     const encryptedBaseBytes = base64ToBytes(encryptedBase.protectedBlobBase64);
     const parsedEncryptedBase = extractPublicationRecordCollection(encryptedBaseBytes);
     publicationNotice = await createPublicationNotice({
+      ...publicationNoticeOptions,
       payloadBytes: parsedEncryptedBase.payloadBytes,
       artifactId,
       programId,
@@ -977,6 +982,7 @@ export async function protectModuleArtifact(options = {}) {
     });
   } else {
     publicationNotice = await createPublicationNotice({
+      ...publicationNoticeOptions,
       payloadBytes: bundleBytes,
       artifactId,
       programId,

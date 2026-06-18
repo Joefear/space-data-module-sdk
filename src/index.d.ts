@@ -948,6 +948,8 @@ export function protectModuleArtifact(options: {
   artifactId?: string;
   recipientPublicKeyHex?: string;
   mnemonic?: string;
+  publishTimestamp?: string;
+  publishTimestampMs?: number;
   target?: string | DeploymentTarget;
   targetUrl?: string;
   capabilities?: string[];
