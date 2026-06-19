@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WASI } from "node:wasi";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -600,6 +600,19 @@ test("c++ source compile emits a compliant wasm module with aligned manifest met
   assert.ok(result.wasmBytes.length > 0);
   assert.ok(result.guestLink?.objectBytes.length > 0);
   assert.ok(result.guestLink?.methodSymbols?.propagate);
+});
+
+test("source compilation uses production optimization flags for module objects", async () => {
+  const source = await readFile(
+    new URL("../src/compiler/compileModule.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /function buildSourceCompilerArgs\(options = \{\}\)/);
+  assert.match(source, /"-O3"/);
+  assert.match(source, /"-DNDEBUG"/);
+  assert.doesNotMatch(source, /const args = \[\s+"-O2"/);
+  assert.match(source, /sourceCompilerCommand,\s+"\-c",\s+sourcePath,[\s\S]*\.\.\.buildSourceCompilerArgs\(compileOptions\)/);
+  assert.match(source, /sourcePath,[\s\S]*\.\.\.guestLink\.renameArgs,[\s\S]*\.\.\.buildSourceCompilerArgs\(compileOptions\)/);
 });
 
 test("wasmedge-targeted compile resolves to the pthread thread model", async () => {

@@ -111,7 +111,7 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
     extraArgs.push("-s", "ALLOW_MEMORY_GROWTH=1");
   }
   const args = [
-    "-O2",
+    "-O3",
     ...threadArgs,
     "-s",
     "STANDALONE_WASM=1",
@@ -120,6 +120,14 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
   ];
   if (options.noEntry === true) {
     args.splice(1, 0, "--no-entry");
+  }
+  return args;
+}
+
+function buildSourceCompilerArgs(options = {}) {
+  const args = ["-O3", "-DNDEBUG"];
+  if (options.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
+    args.push("-pthread");
   }
   return args;
 }
@@ -457,6 +465,7 @@ async function compileWithEmception(options = {}) {
             sourcePath,
             `-I${workDir}`,
             `-I${runtimeIncludeDir}`,
+            ...buildSourceCompilerArgs(compileOptions),
             "-o",
             sourceObjectPath,
           ],
@@ -487,6 +496,7 @@ async function compileWithEmception(options = {}) {
           `-I${workDir}`,
           `-I${runtimeIncludeDir}`,
           ...guestLink.renameArgs,
+          ...buildSourceCompilerArgs(compileOptions),
           "-o",
           linkObjectPath,
         ];
@@ -645,9 +655,7 @@ async function compileWithSystemEmscripten(options = {}) {
       sourcePath,
       `-I${tempDir}`,
       `-I${runtimeIncludeDir}`,
-      ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
-        ? ["-pthread"]
-        : []),
+      ...buildSourceCompilerArgs(compileOptions),
       "-o",
       sourceObjectPath,
     ];
@@ -667,10 +675,8 @@ async function compileWithSystemEmscripten(options = {}) {
       sourcePath,
       `-I${tempDir}`,
       `-I${runtimeIncludeDir}`,
-      ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
-        ? ["-pthread"]
-        : []),
       ...guestLink.renameArgs,
+      ...buildSourceCompilerArgs(compileOptions),
       "-o",
       linkObjectPath,
     ];
