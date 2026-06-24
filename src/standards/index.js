@@ -7,6 +7,54 @@ import { sharedModuleCatalog } from "./sharedCatalog.js";
 const require = createRequire(import.meta.url);
 const standardsCatalogPromises = new Map();
 const knownTypeCatalogPromises = new Map();
+const requiredCurrentScvTokens = Object.freeze([
+  "SENSOR_LOCAL",
+  "table SCVResult",
+  "table SCVSensorShapeContract",
+  "SAR_ANNULAR_SECTOR",
+  "enum scvSensorRangeBoundaryKind",
+  "table SCVAggregateStatistics",
+  "AGGREGATE_STATISTICS:SCVAggregateStatistics",
+  "table SCVPackedRasterProducts",
+  "table SCVPackedRasterBand",
+  "RASTER_PRODUCTS:SCVPackedRasterProducts",
+  "enum scvRasterProductKind",
+]);
+const currentScvResultFields = Object.freeze(
+  new Set([
+    "JOB_ID",
+    "TRACE_ID",
+    "STATUS",
+    "TIME_GRID",
+    "TARGET_BODY",
+    "TOTAL_SENSORS",
+    "TOTAL_WINDOWS",
+    "CELL_STATS",
+    "INTERVALS",
+    "LATITUDE_BANDS",
+    "TIME_SERIES",
+    "HISTOGRAMS",
+    "CONTRIBUTIONS",
+    "GEOMETRY",
+    "RASTER_PRODUCTS",
+    "MESSAGE",
+    "AGGREGATE_STATISTICS",
+  ]),
+);
+
+function collectFlatbufferTableFields(idl, tableName) {
+  const match = String(idl ?? "").match(
+    new RegExp(`\\btable\\s+${tableName}\\s*\\{([\\s\\S]*?)\\n\\}`, "m"),
+  );
+  if (!match) {
+    return [];
+  }
+  return match[1]
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, "").trim())
+    .map((line) => line.match(/^([A-Z0-9_]+)\s*:/)?.[1] ?? null)
+    .filter(Boolean);
+}
 
 function resolveStandardsManifestPath(options = {}) {
   const standardsRoot =
@@ -53,9 +101,46 @@ function parseStandardsEntry([schemaCode, entry]) {
       ? normalizeFileIdentifier(fileIdentifierMatch[1])
       : null,
     hash: hashMatch ? hashMatch[1].toLowerCase() : null,
+    idl,
     version: versionMatch ? versionMatch[1].trim() : null,
     files: Array.isArray(entry?.files) ? entry.files : [],
   };
+}
+
+function validateStandardsCatalogFreshness(catalog, sourceName) {
+  const issues = [];
+  const scvEntry = catalog.find((entry) => entry.schemaCode === "SCV");
+  if (!scvEntry) {
+    return issues;
+  }
+  const missingTokens = requiredCurrentScvTokens.filter(
+    (token) => !scvEntry.idl.includes(token),
+  );
+  if (missingTokens.length > 0) {
+    issues.push({
+      severity: "error",
+      code: "stale-scv-contract",
+      message:
+        "The loaded spacedatastandards.org SCV catalog is stale and does not " +
+        `include required current coverage fields: ${missingTokens.join(", ")}.`,
+      location: `${sourceName}.standards.SCV`,
+    });
+  }
+  const unsupportedResultFields = collectFlatbufferTableFields(
+    scvEntry.idl,
+    "SCVResult",
+  ).filter((field) => !currentScvResultFields.has(field));
+  if (unsupportedResultFields.length > 0) {
+    issues.push({
+      severity: "error",
+      code: "stale-scv-contract",
+      message:
+        "The loaded spacedatastandards.org SCV catalog contains unsupported " +
+        `SCVResult fields that are not part of the current contract: ${unsupportedResultFields.join(", ")}.`,
+      location: `${sourceName}.standards.SCV`,
+    });
+  }
+  return issues;
 }
 
 export async function loadStandardsCatalog(options = {}) {
@@ -144,7 +229,7 @@ export async function validateManifestAgainstStandardsCatalog(
 ) {
   const catalog = options.catalog ?? (await loadKnownTypeCatalog(options));
   const sourceName = options.sourceName ?? "manifest";
-  const issues = [];
+  const issues = validateStandardsCatalogFreshness(catalog, sourceName);
   for (const { source, typeRef } of collectTypeRefs(manifest)) {
     if (typeRef?.acceptsAnyFlatbuffer === true) {
       continue;

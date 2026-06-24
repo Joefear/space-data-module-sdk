@@ -229,6 +229,32 @@ function createAlignedByteVector(builder, bytes, alignment) {
   return builder.endVector();
 }
 
+function arenaBackedBuilder(arenaInput, description) {
+  const arena = toUint8Array(arenaInput);
+  if (!arena || arena.byteLength <= 0) {
+    throw new TypeError(`${description} requires a non-empty Uint8Array arena.`);
+  }
+  const builder = new flatbuffers.Builder(1);
+  builder.bb = new flatbuffers.ByteBuffer(arena);
+  builder.space = arena.byteLength;
+  builder.clear();
+  builder.bb = new flatbuffers.ByteBuffer(arena);
+  builder.space = arena.byteLength;
+  return builder;
+}
+
+function withFixedBuilderArena(callback, description) {
+  const previousGrow = flatbuffers.Builder.growByteBuffer;
+  try {
+    flatbuffers.Builder.growByteBuffer = () => {
+      throw new Error(`${description} arena is too small.`);
+    };
+    return callback();
+  } finally {
+    flatbuffers.Builder.growByteBuffer = previousGrow;
+  }
+}
+
 function describeInvokeBufferKind(kind) {
   return kind === "request" ? "PIV request" : "PIV response";
 }
@@ -276,6 +302,79 @@ function packArenaFrames(frames = [], normalizeFrame = normalizeSdsArenaFrame) {
     frames: packedFrames,
     arena,
     arenaAlignment,
+  };
+}
+
+function hasExplicitFrameOffset(frame = {}) {
+  return frame.offset !== undefined || frame.OFFSET !== undefined;
+}
+
+function normalizeExternalArenaFrame(frame = {}, externalArena) {
+  const payload = toUint8Array(frame.payload);
+  const typeRefInput = frame.typeRef ?? frame.allowedType ?? {};
+  const wireFormat = toSdsWireFormat(typeRefInput.wireFormat ?? frame.wireFormat);
+  const requiredAlignment = normalizeUnsignedInteger(
+    typeRefInput.requiredAlignment ?? frame.requiredAlignment,
+  );
+  const alignment = Math.max(
+    INVOKE_ARENA_ALIGNMENT,
+    normalizeUnsignedInteger(frame.alignment),
+    requiredAlignment,
+  );
+  let offset = normalizeUnsignedInteger(frame.offset ?? frame.OFFSET);
+  if (
+    !hasExplicitFrameOffset(frame) &&
+    payload &&
+    externalArena &&
+    payload.buffer === externalArena.buffer
+  ) {
+    offset = payload.byteOffset - externalArena.byteOffset;
+  }
+  const size = normalizeUnsignedInteger(
+    frame.size ?? frame.SIZE ?? frame.byteLength ?? payload?.byteLength,
+  );
+  if (size > 0 && externalArena) {
+    if (offset > externalArena.length || size > externalArena.length - offset) {
+      throw new Error("SDS PIV external arena frame range exceeds externalArena.");
+    }
+    const absoluteOffset = externalArena.byteOffset + offset;
+    if (alignment > 1 && absoluteOffset % alignment !== 0) {
+      throw new Error(
+        `SDS PIV external arena frame "${frame.portId ?? ""}" is misaligned: absolute offset ${absoluteOffset} violates alignment ${alignment}.`,
+      );
+    }
+  }
+  return new SdsTABT(
+    offset,
+    size,
+    alignment,
+    wireFormat,
+    toSdsFlatBufferTypeRefT(typeRefInput),
+    toSdsMutability(frame.mutability),
+    toSdsOwnership(frame.ownership),
+    encodeSdsFrameId(frame),
+    frame.portId ?? null,
+  );
+}
+
+function packExternalArenaFrames(frames = [], externalArenaInput) {
+  const externalArena = toUint8Array(externalArenaInput);
+  if (!externalArena) {
+    throw new TypeError(
+      "SDS PIV external arena encoding requires externalArena bytes.",
+    );
+  }
+  let arenaAlignment = INVOKE_ARENA_ALIGNMENT;
+  const packedFrames = frames.map((frame) => {
+    const packedFrame = normalizeExternalArenaFrame(frame, externalArena);
+    arenaAlignment = Math.max(arenaAlignment, arenaFrameAlignment(packedFrame));
+    return packedFrame;
+  });
+  return {
+    frames: packedFrames,
+    arena: new Uint8Array(),
+    arenaAlignment,
+    externalArena,
   };
 }
 
@@ -376,11 +475,14 @@ function packFrameOffsets(builder, frames) {
   return frames.map((frame) => frame.pack(builder));
 }
 
-export function encodePluginInvokeRequest(request = {}) {
-  const { frames, arena, arenaAlignment } = packArenaFrames(
-    Array.isArray(request.inputs) ? request.inputs : request.inputFrames ?? [],
-  );
-  const builder = new flatbuffers.Builder(1024);
+function encodePluginInvokeRequestWithBuilder(builder, request = {}) {
+  const inputFrames = Array.isArray(request.inputs)
+    ? request.inputs
+    : request.inputFrames ?? [];
+  const { frames, arena, arenaAlignment } =
+    request.externalArena !== undefined
+      ? packExternalArenaFrames(inputFrames, request.externalArena)
+      : packArenaFrames(inputFrames);
   const methodIdOffset =
     request.methodId !== null && request.methodId !== undefined
       ? builder.createString(String(request.methodId))
@@ -411,6 +513,31 @@ export function encodePluginInvokeRequest(request = {}) {
     "request",
     arenaAlignment,
   );
+  return bytes;
+}
+
+export function encodePluginInvokeRequest(request = {}) {
+  return encodePluginInvokeRequestWithBuilder(
+    new flatbuffers.Builder(1024),
+    request,
+  );
+}
+
+export function writePluginInvokeRequestToArena(request = {}, arenaInput) {
+  const builder = arenaBackedBuilder(
+    arenaInput,
+    "SDS PIV direct invoke request",
+  );
+  const bytes = withFixedBuilderArena(
+    () => encodePluginInvokeRequestWithBuilder(builder, request),
+    "SDS PIV direct invoke request",
+  );
+  const arena = toUint8Array(arenaInput);
+  if (bytes.buffer !== arena.buffer) {
+    throw new Error(
+      "SDS PIV direct invoke request was not authored in the supplied arena.",
+    );
+  }
   return bytes;
 }
 
@@ -454,9 +581,13 @@ function resolvePivStatus(response = {}) {
 }
 
 export function encodePluginInvokeResponse(response = {}) {
-  const { frames, arena, arenaAlignment } = packArenaFrames(
-    Array.isArray(response.outputs) ? response.outputs : response.outputFrames ?? [],
-  );
+  const outputFrames = Array.isArray(response.outputs)
+    ? response.outputs
+    : response.outputFrames ?? [];
+  const { frames, arena, arenaAlignment } =
+    response.externalArena !== undefined
+      ? packExternalArenaFrames(outputFrames, response.externalArena)
+      : packArenaFrames(outputFrames);
   const builder = new flatbuffers.Builder(1024);
   const errorCodeOffset =
     response.errorCode !== null && response.errorCode !== undefined

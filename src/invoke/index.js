@@ -8,4 +8,5 @@ export {
   forwardOutputFrameAsInput,
   normalizeInvokeSurfaceName,
   normalizeInvokeSurfaces,
+  writePluginInvokeRequestToArena,
 } from "./codec.js";

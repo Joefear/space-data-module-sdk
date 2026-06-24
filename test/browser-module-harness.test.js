@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import {
   cleanupCompilation,
   compileModuleFromSource,
+  encodePluginInvokeResponse,
 } from "../src/index.js";
 import {
   createBrowserModuleHarness,
   detectArtifactProfile,
   isSharedArrayBufferLike,
 } from "../src/testing/browserModuleHarness.js";
+
+function readSource(relativePath) {
+  return readFileSync(new URL(relativePath, import.meta.url), "utf8");
+}
 
 const IMPORTED_SHARED_MEMORY_WASM_BYTES = new Uint8Array([
   // (module
@@ -78,6 +84,64 @@ const IMPORTED_SHARED_MEMORY_WITH_RUNTIME_STUBS_WASM_BYTES = new Uint8Array([
   5, 65, 7, 11,
 ]);
 
+const DIRECT_SHARED_MEMORY_INVOKE_WASM_BYTES = new Uint8Array([
+  // (module
+  //   (import "env" "memory" (memory 1 1 shared))
+  //   (global $heap (mut i32) (i32.const 1024))
+  //   (func (export "plugin_alloc") ... 16-byte bump allocator ...)
+  //   (func (export "plugin_free") (param i32 i32))
+  //   (func (export "plugin_invoke_stream") (param $reqPtr i32) (param $reqLen i32) (param $outLenPtr i32) (result i32)
+  //     ;; response pointer and byte length are stored by the test at memory[0..8].
+  //     local.get $outLenPtr
+  //     i32.const 4
+  //     i32.load
+  //     i32.store
+  //     i32.const 0
+  //     i32.load)
+  //   (func (export "plugin_get_manifest_flatbuffer") (result i32) i32.const 0)
+  //   (func (export "plugin_get_manifest_flatbuffer_size") (result i32) i32.const 0))
+  0, 97, 115, 109, 1, 0, 0, 0, 1, 22, 4, 96, 1, 127, 1, 127,
+  96, 2, 127, 127, 0, 96, 3, 127, 127, 127, 1, 127, 96, 0, 1, 127,
+  2, 16, 1, 3, 101, 110, 118, 6, 109, 101, 109, 111, 114, 121, 2, 3,
+  1, 1, 3, 7, 6, 0, 0, 1, 2, 3, 3, 6, 7, 1, 127, 1,
+  65, 128, 8, 11, 7, 124, 5, 12, 112, 108, 117, 103, 105, 110, 95, 97,
+  108, 108, 111, 99, 0, 1, 11, 112, 108, 117, 103, 105, 110, 95, 102, 114,
+  101, 101, 0, 2, 20, 112, 108, 117, 103, 105, 110, 95, 105, 110, 118, 111,
+  107, 101, 95, 115, 116, 114, 101, 97, 109, 0, 3, 30, 112, 108, 117, 103,
+  105, 110, 95, 103, 101, 116, 95, 109, 97, 110, 105, 102, 101, 115, 116, 95,
+  102, 108, 97, 116, 98, 117, 102, 102, 101, 114, 0, 4, 35, 112, 108, 117,
+  103, 105, 110, 95, 103, 101, 116, 95, 109, 97, 110, 105, 102, 101, 115, 116,
+  95, 102, 108, 97, 116, 98, 117, 102, 102, 101, 114, 95, 115, 105, 122, 101,
+  0, 5, 10, 63, 6, 10, 0, 32, 0, 65, 15, 106, 65, 112, 113, 11,
+  19, 1, 1, 127, 35, 0, 16, 0, 34, 1, 32, 0, 106, 16, 0, 36,
+  0, 32, 1, 11, 2, 0, 11, 17, 0, 32, 2, 65, 4, 40, 2, 0,
+  54, 2, 0, 65, 0, 40, 2, 0, 11, 4, 0, 65, 0, 11, 4, 0,
+  65, 0, 11,
+]);
+
+const DIRECT_SHARED_MEMORY_GROW_INVOKE_WASM_BYTES = new Uint8Array([
+  // Same direct-invoke test module as DIRECT_SHARED_MEMORY_INVOKE_WASM_BYTES,
+  // but plugin_invoke_stream grows shared memory by one page before returning.
+  0, 97, 115, 109, 1, 0, 0, 0, 1, 22, 4, 96, 1, 127, 1, 127, 96,
+  2, 127, 127, 0, 96, 3, 127, 127, 127, 1, 127, 96, 0, 1, 127,
+  2, 16, 1, 3, 101, 110, 118, 6, 109, 101, 109, 111, 114, 121,
+  2, 3, 1, 2, 3, 7, 6, 0, 0, 1, 2, 3, 3, 6, 7, 1, 127,
+  1, 65, 128, 8, 11, 7, 124, 5, 12, 112, 108, 117, 103, 105, 110,
+  95, 97, 108, 108, 111, 99, 0, 1, 11, 112, 108, 117, 103, 105,
+  110, 95, 102, 114, 101, 101, 0, 2, 20, 112, 108, 117, 103, 105,
+  110, 95, 105, 110, 118, 111, 107, 101, 95, 115, 116, 114, 101,
+  97, 109, 0, 3, 30, 112, 108, 117, 103, 105, 110, 95, 103, 101,
+  116, 95, 109, 97, 110, 105, 102, 101, 115, 116, 95, 102, 108, 97,
+  116, 98, 117, 102, 102, 101, 114, 0, 4, 35, 112, 108, 117, 103,
+  105, 110, 95, 103, 101, 116, 95, 109, 97, 110, 105, 102, 101, 115,
+  116, 95, 102, 108, 97, 116, 98, 117, 102, 102, 101, 114, 95, 115,
+  105, 122, 101, 0, 5, 10, 68, 6, 10, 0, 32, 0, 65, 15, 106, 65,
+  112, 113, 11, 19, 1, 1, 127, 35, 0, 16, 0, 34, 1, 32, 0, 106,
+  16, 0, 36, 0, 32, 1, 11, 2, 0, 11, 22, 0, 32, 2, 65, 4,
+  40, 2, 0, 54, 2, 0, 65, 1, 64, 0, 26, 65, 0, 40, 2, 0,
+  11, 4, 0, 65, 0, 11, 4, 0, 65, 0, 11,
+]);
+
 function createSharedMemoryOrSkip(t) {
   if (typeof SharedArrayBuffer !== "function") {
     t.skip("SharedArrayBuffer is not available in this runtime.");
@@ -110,18 +174,21 @@ function createPort(portId, required = true) {
   };
 }
 
-function createManifest() {
+function createManifest({
+  invokeSurfaces = ["command"],
+  methodId = "echo",
+} = {}) {
   return {
     pluginId: "com.digitalarsenal.examples.browser-module-harness",
     name: "Browser Module Harness Host Access Test",
     version: "0.1.0",
     pluginFamily: "analysis",
     runtimeTargets: ["browser", "wasmedge"],
-    invokeSurfaces: ["command"],
+    invokeSurfaces,
     methods: [
       {
-        methodId: "echo",
-        displayName: "echo",
+        methodId,
+        displayName: methodId,
         inputPorts: [createPort("request", true)],
         outputPorts: [createPort("response", false)],
         maxBatch: 1,
@@ -162,6 +229,38 @@ int echo(void) {
     frame->file_identifier,
     frame->payload,
     frame->payload_length
+  );
+  return 0;
+}
+`;
+}
+
+function createPointerCheckingSource() {
+  return `#include <stdint.h>
+#include "space_data_module_invoke.h"
+
+int verify_direct_arena(void) {
+  const plugin_input_frame_t *frame = plugin_get_input_frame(0);
+  if (!frame || !frame->payload || frame->payload_length < 4) {
+    plugin_set_error("missing-frame", "No external arena input frame was provided.");
+    return 3;
+  }
+  uint32_t expected =
+    ((uint32_t)frame->payload[0]) |
+    ((uint32_t)frame->payload[1] << 8) |
+    ((uint32_t)frame->payload[2] << 16) |
+    ((uint32_t)frame->payload[3] << 24);
+  uintptr_t actual = (uintptr_t)frame->payload;
+  if (actual != (uintptr_t)expected) {
+    plugin_set_error("external-arena-copied", "External arena payload was copied before invoke.");
+    return 9;
+  }
+  plugin_push_output(
+    "response",
+    frame->schema_name,
+    frame->file_identifier,
+    frame->payload + 4,
+    frame->payload_length - 4
   );
   return 0;
 }
@@ -341,6 +440,386 @@ test("browser module harness exposes awaited host dispatch alongside module invo
     dialed: "/space-data-network/module-delivery/1.0.0",
     peerId: "12D3KooWHarnessPeer",
   });
+});
+
+test("browser module harness external arena direct invoke rejects non-shared module memory", async (t) => {
+  const compilation = await compileModuleFromSource({
+    manifest: createManifest({
+      invokeSurfaces: ["direct"],
+      methodId: "verify_direct_arena",
+    }),
+    sourceCode: createPointerCheckingSource(),
+    language: "c",
+  });
+  t.after(async () => {
+    await cleanupCompilation(compilation);
+  });
+
+  const harness = await createBrowserModuleHarness({
+    wasmSource: compilation.wasmBytes,
+    surface: "direct",
+  });
+  t.after(() => {
+    harness.destroy();
+  });
+
+  const payloadText = "module memory but not shared";
+  const payloadBytes = new TextEncoder().encode(payloadText);
+  const payloadSize = payloadBytes.byteLength + 4;
+  const payloadPtr = harness.instance.exports.plugin_alloc(payloadSize);
+  assert.ok(payloadPtr > 0);
+  t.after(() => {
+    harness.instance.exports.plugin_free(payloadPtr, payloadSize);
+  });
+
+  const payloadView = new Uint8Array(harness.memory.buffer, payloadPtr, payloadSize);
+  new DataView(harness.memory.buffer).setUint32(payloadPtr, payloadPtr, true);
+  payloadView.set(payloadBytes, 4);
+
+  await assert.rejects(
+    harness.invoke({
+      methodId: "verify_direct_arena",
+      externalArena: new Uint8Array(harness.memory.buffer),
+      inputs: [
+        {
+          portId: "request",
+          offset: payloadPtr,
+          size: payloadSize,
+          alignment: 8,
+          typeRef: {
+            schemaName: "Blob.fbs",
+            fileIdentifier: "BLOB",
+          },
+        },
+      ],
+    }),
+    /SharedArrayBuffer-backed module memory/i,
+  );
+});
+
+test("browser module harness direct invoke requires shared module-owned external arenas", async (t) => {
+  if (typeof SharedArrayBuffer !== "function") {
+    t.skip("SharedArrayBuffer is not available in this runtime.");
+    return;
+  }
+  const harness = await createBrowserModuleHarness({
+    wasmSource: DIRECT_SHARED_MEMORY_INVOKE_WASM_BYTES,
+    surface: "direct",
+    sharedMemory: true,
+    initialMemoryBytes: 65536,
+    maximumMemoryBytes: 65536,
+    directInvokeRequestArenaBytes: 4096,
+  });
+  t.after(() => {
+    harness.destroy();
+  });
+  assert.equal(harness.memory.buffer instanceof SharedArrayBuffer, true);
+
+  const responseBytes = encodePluginInvokeResponse({
+    statusCode: 0,
+    outputs: [],
+  });
+  const responsePtr = harness.instance.exports.plugin_alloc(responseBytes.byteLength);
+  assert.ok(responsePtr > 0);
+  new Uint8Array(
+    harness.memory.buffer,
+    responsePtr,
+    responseBytes.byteLength,
+  ).set(responseBytes);
+  const responseControl = new DataView(harness.memory.buffer);
+  responseControl.setUint32(0, responsePtr, true);
+  responseControl.setUint32(4, responseBytes.byteLength, true);
+
+  const foreignExternalArena = new Uint8Array(new SharedArrayBuffer(64));
+  foreignExternalArena.set(new TextEncoder().encode("foreign arena"), 16);
+
+  await assert.rejects(
+    harness.invoke({
+      methodId: "verify_direct_arena",
+      externalArena: foreignExternalArena,
+      inputs: [
+        {
+          portId: "request",
+          offset: 16,
+          size: "foreign arena".length,
+          alignment: 8,
+          typeRef: {
+            schemaName: "Blob.fbs",
+            fileIdentifier: "BLOB",
+          },
+        },
+      ],
+    }),
+    /externalArena.*module.*memory/i,
+  );
+
+  const payloadText = "hello from module-owned external arena";
+  const payloadBytes = new TextEncoder().encode(payloadText);
+  const payloadSize = payloadBytes.byteLength + 4;
+  const payloadPtr = harness.instance.exports.plugin_alloc(payloadSize);
+  assert.ok(payloadPtr > 0);
+  t.after(() => {
+    harness.instance.exports.plugin_free(payloadPtr, payloadSize);
+  });
+
+  const moduleArena = new Uint8Array(harness.memory.buffer);
+  const payloadView = new Uint8Array(harness.memory.buffer, payloadPtr, payloadSize);
+  new DataView(harness.memory.buffer).setUint32(payloadPtr, payloadPtr, true);
+  payloadView.set(payloadBytes, 4);
+
+  const invokeResponse = await harness.invoke({
+    methodId: "direct_shared_arena",
+    externalArena: moduleArena,
+    inputs: [
+      {
+        portId: "request",
+        offset: payloadPtr,
+        size: payloadSize,
+        alignment: 8,
+        typeRef: {
+          schemaName: "Blob.fbs",
+          fileIdentifier: "BLOB",
+        },
+      },
+    ],
+  });
+
+  assert.equal(invokeResponse.statusCode, 0);
+  assert.deepEqual(invokeResponse.outputs, []);
+});
+
+test("browser module harness direct invoke decodes external arena outputs as module memory views", async (t) => {
+  if (typeof SharedArrayBuffer !== "function") {
+    t.skip("SharedArrayBuffer is not available in this runtime.");
+    return;
+  }
+  const harness = await createBrowserModuleHarness({
+    wasmSource: DIRECT_SHARED_MEMORY_INVOKE_WASM_BYTES,
+    surface: "direct",
+    sharedMemory: true,
+    initialMemoryBytes: 65536,
+    maximumMemoryBytes: 65536,
+    directInvokeRequestArenaBytes: 4096,
+  });
+  t.after(() => {
+    harness.destroy();
+  });
+
+  const moduleArena = new Uint8Array(harness.memory.buffer);
+  const outputBytes = new TextEncoder().encode("module-owned output");
+  const outputPtr = harness.instance.exports.plugin_alloc(outputBytes.byteLength);
+  assert.ok(outputPtr > 0);
+  t.after(() => {
+    harness.instance.exports.plugin_free(outputPtr, outputBytes.byteLength);
+  });
+  moduleArena.set(outputBytes, outputPtr);
+
+  const responseBytes = encodePluginInvokeResponse({
+    statusCode: 0,
+    externalArena: moduleArena,
+    outputs: [
+      {
+        portId: "response",
+        offset: outputPtr,
+        size: outputBytes.byteLength,
+        alignment: 8,
+        typeRef: {
+          schemaName: "SCV/main.fbs",
+          fileIdentifier: "$SCV",
+          rootTypeName: "SCVResult",
+          wireFormat: "aligned-binary",
+        },
+      },
+    ],
+  });
+  const responsePtr = harness.instance.exports.plugin_alloc(responseBytes.byteLength);
+  assert.ok(responsePtr > 0);
+  t.after(() => {
+    harness.instance.exports.plugin_free(responsePtr, responseBytes.byteLength);
+  });
+  moduleArena.set(responseBytes, responsePtr);
+  const responseControl = new DataView(harness.memory.buffer);
+  responseControl.setUint32(0, responsePtr, true);
+  responseControl.setUint32(4, responseBytes.byteLength, true);
+
+  const invokeResponse = await harness.invoke({
+    methodId: "direct_shared_arena",
+    externalArena: moduleArena,
+    inputs: [],
+  });
+
+  assert.equal(invokeResponse.statusCode, 0);
+  assert.equal(invokeResponse.outputs.length, 1);
+  assert.equal(invokeResponse.outputs[0].payload.buffer, harness.memory.buffer);
+  assert.equal(invokeResponse.outputs[0].payload.byteOffset, outputPtr);
+  assert.equal(invokeResponse.outputs[0].payload.byteLength, outputBytes.byteLength);
+  assert.deepEqual(Array.from(invokeResponse.outputs[0].payload), Array.from(outputBytes));
+});
+
+test("browser module harness direct invoke decodes outputs against grown shared memory", async (t) => {
+  if (typeof SharedArrayBuffer !== "function") {
+    t.skip("SharedArrayBuffer is not available in this runtime.");
+    return;
+  }
+  const harness = await createBrowserModuleHarness({
+    wasmSource: DIRECT_SHARED_MEMORY_GROW_INVOKE_WASM_BYTES,
+    surface: "direct",
+    sharedMemory: true,
+    initialMemoryBytes: 65536,
+    maximumMemoryBytes: 131072,
+    directInvokeRequestArenaBytes: 4096,
+  });
+  t.after(() => {
+    harness.destroy();
+  });
+
+  const initialMemoryBuffer = harness.memory.buffer;
+  const moduleArenaBeforeInvoke = new Uint8Array(initialMemoryBuffer);
+  const outputBytes = new TextEncoder().encode("output before memory growth");
+  const outputPtr = harness.instance.exports.plugin_alloc(outputBytes.byteLength);
+  assert.ok(outputPtr > 0);
+  moduleArenaBeforeInvoke.set(outputBytes, outputPtr);
+
+  const responseBytes = encodePluginInvokeResponse({
+    statusCode: 0,
+    externalArena: moduleArenaBeforeInvoke,
+    outputs: [
+      {
+        portId: "response",
+        offset: outputPtr,
+        size: outputBytes.byteLength,
+        alignment: 8,
+        typeRef: {
+          schemaName: "SCV/main.fbs",
+          fileIdentifier: "$SCV",
+          rootTypeName: "SCVResult",
+          wireFormat: "aligned-binary",
+        },
+      },
+    ],
+  });
+  const responsePtr = harness.instance.exports.plugin_alloc(responseBytes.byteLength);
+  assert.ok(responsePtr > 0);
+  moduleArenaBeforeInvoke.set(responseBytes, responsePtr);
+  const responseControl = new DataView(initialMemoryBuffer);
+  responseControl.setUint32(0, responsePtr, true);
+  responseControl.setUint32(4, responseBytes.byteLength, true);
+
+  const invokeResponse = await harness.invoke({
+    methodId: "direct_shared_arena",
+    externalArena: moduleArenaBeforeInvoke,
+    inputs: [],
+  });
+
+  assert.notEqual(harness.memory.buffer, initialMemoryBuffer);
+  assert.equal(invokeResponse.statusCode, 0);
+  assert.equal(invokeResponse.outputs.length, 1);
+  assert.equal(invokeResponse.outputs[0].payload.buffer, harness.memory.buffer);
+  assert.equal(invokeResponse.outputs[0].payload.byteOffset, outputPtr);
+  assert.equal(invokeResponse.outputs[0].payload.byteLength, outputBytes.byteLength);
+  assert.deepEqual(Array.from(invokeResponse.outputs[0].payload), Array.from(outputBytes));
+});
+
+test("browser module harness can disable raw direct invoke for descriptor-only modules", async (t) => {
+  if (typeof SharedArrayBuffer !== "function") {
+    t.skip("SharedArrayBuffer is not available in this runtime.");
+    return;
+  }
+  const harness = await createBrowserModuleHarness({
+    wasmSource: DIRECT_SHARED_MEMORY_INVOKE_WASM_BYTES,
+    surface: "direct",
+    sharedMemory: true,
+    initialMemoryBytes: 65536,
+    maximumMemoryBytes: 65536,
+    directInvokeRequestArenaBytes: 4096,
+    allowRawInvoke: false,
+  });
+  t.after(() => {
+    harness.destroy();
+  });
+
+  await assert.rejects(
+    harness.invokeRaw(new Uint8Array([1, 2, 3, 4])),
+    /raw direct invoke is disabled/i,
+  );
+  await assert.rejects(
+    harness.invoke({
+      methodId: "direct_shared_arena",
+      inputs: [
+        {
+          portId: "request",
+          typeRef: {
+            schemaName: "Blob.fbs",
+            fileIdentifier: "BLOB",
+          },
+          payload: new TextEncoder().encode("copy path is forbidden"),
+        },
+      ],
+    }),
+    /externalArena/i,
+  );
+
+  const responseBytes = encodePluginInvokeResponse({
+    statusCode: 0,
+    outputs: [],
+  });
+  const responsePtr = harness.instance.exports.plugin_alloc(responseBytes.byteLength);
+  assert.ok(responsePtr > 0);
+  new Uint8Array(
+    harness.memory.buffer,
+    responsePtr,
+    responseBytes.byteLength,
+  ).set(responseBytes);
+  const responseControl = new DataView(harness.memory.buffer);
+  responseControl.setUint32(0, responsePtr, true);
+  responseControl.setUint32(4, responseBytes.byteLength, true);
+
+  const payloadText = "descriptor-only external arena";
+  const payloadBytes = new TextEncoder().encode(payloadText);
+  const payloadSize = payloadBytes.byteLength + 4;
+  const payloadPtr = harness.instance.exports.plugin_alloc(payloadSize);
+  assert.ok(payloadPtr > 0);
+  t.after(() => {
+    harness.instance.exports.plugin_free(payloadPtr, payloadSize);
+  });
+
+  const payloadView = new Uint8Array(harness.memory.buffer, payloadPtr, payloadSize);
+  new DataView(harness.memory.buffer).setUint32(payloadPtr, payloadPtr, true);
+  payloadView.set(payloadBytes, 4);
+
+  const invokeResponse = await harness.invoke({
+    methodId: "direct_shared_arena",
+    externalArena: new Uint8Array(harness.memory.buffer),
+    inputs: [
+      {
+        portId: "request",
+        offset: payloadPtr,
+        size: payloadSize,
+        alignment: 8,
+        typeRef: {
+          schemaName: "Blob.fbs",
+          fileIdentifier: "BLOB",
+        },
+      },
+    ],
+  });
+
+  assert.equal(invokeResponse.statusCode, 0);
+  assert.deepEqual(invokeResponse.outputs, []);
+});
+
+test("browser module harness external arena direct invoke bypasses raw byte-frame invoke", () => {
+  const source = readSource("../src/testing/browserModuleHarness.js");
+  const start = source.indexOf("function invokeDirectExternalArena");
+  const stop = source.indexOf("async function invokeCommandRaw", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(stop, -1);
+  const directExternalArenaSource = source.slice(start, stop);
+
+  assert.match(directExternalArenaSource, /writeDirectInvokeRequestToModuleMemory/);
+  assert.match(directExternalArenaSource, /invokeDirectModuleMemoryRequest/);
+  assert.doesNotMatch(directExternalArenaSource, /\binvokeDirectRaw\b/);
+  assert.doesNotMatch(directExternalArenaSource, /\brequestBytes\b/);
 });
 
 test("browser module harness passes explicit shared imported memory to the module", async (t) => {

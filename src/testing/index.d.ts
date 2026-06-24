@@ -8,6 +8,9 @@ import type {
 export interface HarnessInputFrame {
   portId?: string | null;
   typeRef?: PayloadTypeRef | null;
+  alignment?: number;
+  offset?: number;
+  size?: number;
   payload?: Uint8Array | ArrayBuffer | ArrayBufferView | string | null;
 }
 
@@ -187,6 +190,12 @@ export interface PluginInvokeProcessClient {
   invokeRaw(requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView): Promise<Uint8Array>;
   invoke(request: {
     methodId?: string | null;
+    /**
+     * Browser direct invoke requires this to be a full view of the active
+     * SharedArrayBuffer-backed module memory; foreign arenas and
+     * payload-bearing frames are rejected.
+     */
+    externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
     inputs?: HarnessInputFrame[];
   }): Promise<{
       statusCode: number;
@@ -250,6 +259,7 @@ export interface ModuleHarness {
   invokeRaw(requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView): Promise<Uint8Array>;
   invoke(request: {
     methodId?: string | null;
+    externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
     inputs?: HarnessInputFrame[];
   }): Promise<{
       statusCode: number;
@@ -339,8 +349,24 @@ export interface BrowserModuleHarness {
   invokeRaw(
     requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView,
   ): Promise<Uint8Array>;
+  invokeDirect(request: {
+    methodId?: string | null;
+    /**
+     * Browser direct invoke requires this to be a full view of the active
+     * SharedArrayBuffer-backed module memory; foreign arenas and
+     * payload-bearing frames are rejected.
+     */
+    externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
+    inputs?: HarnessInputFrame[];
+  }): Promise<{
+    statusCode: number;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    outputs: HarnessInputFrame[];
+  }>;
   invoke(request: {
     methodId?: string | null;
+    externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
     inputs?: HarnessInputFrame[];
   }): Promise<{
     statusCode: number;
@@ -427,6 +453,7 @@ export function createBrowserModuleHarness(options?: {
   wasmMemory?: WebAssembly.Memory;
   memory?: WebAssembly.Memory;
   sharedMemory?: boolean;
+  allowRawInvoke?: boolean;
   initialMemoryBytes?: number;
   maximumMemoryBytes?: number;
   logOutput?: boolean;

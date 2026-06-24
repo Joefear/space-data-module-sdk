@@ -283,6 +283,8 @@ constexpr bufferMutability kBufferMutabilityImmutable =
   static_cast<bufferMutability>(0);
 constexpr bufferOwnership kBufferOwnershipHostOwned =
   static_cast<bufferOwnership>(0);
+constexpr bufferOwnership kBufferOwnershipPluginOwned =
+  static_cast<bufferOwnership>(1);
 constexpr pivStatus kPivStatusOk = static_cast<pivStatus>(0);
 constexpr pivStatus kPivStatusNotFound = static_cast<pivStatus>(1);
 constexpr pivStatus kPivStatusYielded = static_cast<pivStatus>(2);
@@ -354,6 +356,8 @@ struct OutputFrameOwned {
   uint32_t stream_id = 0;
   uint64_t sequence = 0;
   bool end_of_stream = false;
+  const uint8_t *payload_ptr = nullptr;
+  uint32_t payload_length = 0;
   std::vector<uint8_t> payload{};
 };
 
@@ -364,6 +368,7 @@ struct InvokeContext {
   uint64_t trace_id = 0;
   uint32_t backlog_remaining = 0;
   bool yielded = false;
+  bool direct_external_arena_outputs = false;
   int32_t status_code = 0;
   std::string error_code{};
   std::string error_message{};
@@ -381,6 +386,7 @@ ${renderMethodDescriptors(methods)}
 
 static InvokeContext g_invoke_context;
 static std::vector<AllocationRecord> g_allocations{};
+static bool g_direct_invoke_stream = false;
 
 static uintptr_t PtrFromU32(uint32_t value) {
   return static_cast<uintptr_t>(value);
@@ -689,6 +695,11 @@ static bool LoadInputsFromPivRequest(const PIVRequest &request) {
   return true;
 }
 
+static bool PivRequestUsesExternalPayloadArena(const PIVRequest &request) {
+  const auto *payload_arena = request.PAYLOAD_ARENA();
+  return !payload_arena || payload_arena->size() == 0u;
+}
+
 static bool ValidateRequiredInputs(const MethodDescriptor *method) {
   if (!method) {
     return false;
@@ -764,13 +775,15 @@ static std::vector<uint8_t> SerializePivResponse(
   const std::vector<OutputFrameOwned> &outputs,
   const std::string &error_code,
   const std::string &error_message,
-  uint64_t trace_id = 0
+  uint64_t trace_id = 0,
+  bool external_payload_descriptors = false
 ) {
   struct PackedOutputFrame {
     const OutputFrameOwned *output = nullptr;
     uint32_t offset = 0;
     uint32_t size = 0;
     uint32_t alignment = 1;
+    bufferOwnership ownership = kBufferOwnershipHostOwned;
   };
 
   std::vector<uint8_t> payload_arena{};
@@ -781,6 +794,46 @@ static std::vector<uint8_t> SerializePivResponse(
       1u,
       output.required_alignment > 0 ? output.required_alignment : output.alignment
     );
+    if (external_payload_descriptors) {
+      if (!output.payload_ptr && output.payload_length > 0u) {
+        return SerializePivResponse(
+          500,
+          false,
+          0,
+          {},
+          "invalid-output-payload",
+          "Direct output descriptor payload pointer is null but payload length is non-zero.",
+          trace_id,
+          false
+        );
+      }
+      const uintptr_t payload_address = reinterpret_cast<uintptr_t>(output.payload_ptr);
+      if (
+        payload_address > std::numeric_limits<uint32_t>::max() ||
+        output.payload_length >
+          static_cast<uint32_t>(std::numeric_limits<uint32_t>::max() - payload_address)
+      ) {
+        return SerializePivResponse(
+          500,
+          false,
+          0,
+          {},
+          "output-pointer-overflow",
+          "Direct output descriptor exceeds the 32-bit SDS TAB offset range.",
+          trace_id,
+          false
+        );
+      }
+      packed_outputs.push_back(PackedOutputFrame{
+        &output,
+        static_cast<uint32_t>(payload_address),
+        output.payload_length,
+        alignment,
+        kBufferOwnershipPluginOwned,
+      });
+      continue;
+    }
+
     size_t aligned_offset = 0;
     if (
       !AlignOffsetChecked(arena_offset, alignment, &aligned_offset) ||
@@ -795,7 +848,8 @@ static std::vector<uint8_t> SerializePivResponse(
         {},
         "output-arena-overflow",
         "Output payload arena exceeds the 32-bit SDS TAB offset range.",
-        trace_id
+        trace_id,
+        false
       );
     }
     payload_arena.resize(aligned_offset, 0);
@@ -810,6 +864,7 @@ static std::vector<uint8_t> SerializePivResponse(
       static_cast<uint32_t>(aligned_offset),
       static_cast<uint32_t>(output.payload.size()),
       alignment,
+      kBufferOwnershipHostOwned,
     });
   }
 
@@ -837,7 +892,7 @@ static std::vector<uint8_t> SerializePivResponse(
       wire_format,
       type_ref,
       kBufferMutabilityImmutable,
-      kBufferOwnershipHostOwned,
+      packed.ownership,
       output && output->has_frame_id ? output->frame_id : 0,
       output && !output->port_id.empty() ? output->port_id.c_str() : nullptr
     ));
@@ -921,7 +976,8 @@ static std::vector<uint8_t> SerializeContextResponse() {
     g_invoke_context.outputs,
     g_invoke_context.error_code,
     g_invoke_context.error_message,
-    g_invoke_context.trace_id
+    g_invoke_context.trace_id,
+    g_invoke_context.direct_external_arena_outputs
   );
 }
 
@@ -965,6 +1021,8 @@ static std::vector<uint8_t> DispatchPivRequestObject(
 
   ResetInvokeContext(method);
   g_invoke_context.trace_id = trace_id;
+  g_invoke_context.direct_external_arena_outputs =
+    g_direct_invoke_stream && PivRequestUsesExternalPayloadArena(request);
   return DispatchLoadedContext(
     method,
     LoadInputsFromPivRequest(request),
@@ -1180,7 +1238,9 @@ extern "C" int32_t plugin_push_output_typed(
   frame.byte_length = byte_length > 0u ? byte_length : payload_length;
   frame.required_alignment = required_alignment;
   frame.alignment = required_alignment > 0 ? required_alignment : 8;
-  if (payload_ptr && payload_length > 0u) {
+  frame.payload_ptr = payload_ptr;
+  frame.payload_length = payload_length;
+  if (!g_invoke_context.direct_external_arena_outputs && payload_ptr && payload_length > 0u) {
     frame.payload.insert(frame.payload.end(), payload_ptr, payload_ptr + payload_length);
   }
 
@@ -1308,11 +1368,14 @@ extern "C" uint32_t plugin_invoke_stream(
       "Invoke request buffer base is not 8-byte aligned."
     );
   } else {
+    const bool previous_direct_invoke_stream = g_direct_invoke_stream;
+    g_direct_invoke_stream = true;
     response_bytes = DispatchRequestBytes(
       ConstPtr(request_ptr),
       static_cast<size_t>(request_len),
       &runtime_error
     );
+    g_direct_invoke_stream = previous_direct_invoke_stream;
   }
   if (response_bytes.size() > std::numeric_limits<uint32_t>::max()) {
     return 0u;

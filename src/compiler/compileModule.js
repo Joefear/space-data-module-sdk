@@ -95,14 +95,27 @@ function ensureExportableMethodIds(manifest) {
   }
 }
 
+function usesPthreadCompileFlags(options = {}) {
+  return (
+    options.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS ||
+    options.sharedMemory === true
+  );
+}
+
 function buildCompilerArgs(exportedSymbols, options = {}) {
   const linkerExports = exportedSymbols.map(
     (symbol) => "-Wl,--export=" + symbol,
   );
   const extraArgs = [];
   const threadArgs = [];
-  if (options.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
+  if (usesPthreadCompileFlags(options)) {
     threadArgs.push("-pthread");
+  }
+  if (options.importedMemory === true) {
+    extraArgs.push("-s", "IMPORTED_MEMORY=1");
+  }
+  if (options.sharedMemory === true) {
+    extraArgs.push("-s", "SHARED_MEMORY=1");
   }
   if (options.allowUndefinedImports === true) {
     extraArgs.push("-s", "ERROR_ON_UNDEFINED_SYMBOLS=0", "-Wl,--allow-undefined");
@@ -126,7 +139,7 @@ function buildCompilerArgs(exportedSymbols, options = {}) {
 
 function buildSourceCompilerArgs(options = {}) {
   const args = ["-O3", "-DNDEBUG"];
-  if (options.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS) {
+  if (usesPthreadCompileFlags(options)) {
     args.push("-pthread");
   }
   return args;
@@ -167,8 +180,11 @@ function resolveThreadModel({ manifest, threadModel } = {}) {
   return ModuleThreadModel.SINGLE_THREAD;
 }
 
-function requiresSystemEmscripten(threadModel) {
-  return threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS;
+function requiresSystemEmscripten(threadModel, options = {}) {
+  return (
+    threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS ||
+    options.sharedMemory === true
+  );
 }
 
 function guestLinkSymbolPrefix(pluginId) {
@@ -687,9 +703,7 @@ async function compileWithSystemEmscripten(options = {}) {
       "-std=c++17",
       `-I${tempDir}`,
       `-I${runtimeIncludeDir}`,
-      ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
-        ? ["-pthread"]
-        : []),
+      ...(usesPthreadCompileFlags(compileOptions) ? ["-pthread"] : []),
       "-o",
       manifestObjectPath,
     ]);
@@ -699,9 +713,7 @@ async function compileWithSystemEmscripten(options = {}) {
       "-std=c++17",
       `-I${tempDir}`,
       `-I${runtimeIncludeDir}`,
-      ...(compileOptions.threadModel === ModuleThreadModel.EMSCRIPTEN_PTHREADS
-        ? ["-pthread"]
-        : []),
+      ...(usesPthreadCompileFlags(compileOptions) ? ["-pthread"] : []),
       "-o",
       invokeObjectPath,
     ]);
@@ -795,7 +807,8 @@ export async function compileModuleFromSource(options = {}) {
     noEntry: includeCommandMain !== true,
     threadModel,
   };
-  const compileFunction = requiresSystemEmscripten(threadModel)
+  const useSystemEmscripten = requiresSystemEmscripten(threadModel, compileOptions);
+  const compileFunction = useSystemEmscripten
     ? compileWithSystemEmscripten
     : compileWithEmception;
   const result = await compileFunction({
@@ -827,7 +840,7 @@ export async function compileModuleFromSource(options = {}) {
   });
 
   return {
-    compiler: requiresSystemEmscripten(threadModel)
+    compiler: useSystemEmscripten
       ? "em++ (system emscripten pthreads)"
       : "em++ (emception)",
     language: compiler.language,

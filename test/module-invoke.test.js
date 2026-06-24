@@ -23,6 +23,7 @@ import {
   encodePluginInvokeRequest,
   encodePluginInvokeResponse,
   encodePluginManifest,
+  writePluginInvokeRequestToArena,
 } from "../src/index.js";
 import { BufferMutability } from "../src/generated/orbpro/stream/buffer-mutability.js";
 import { BufferOwnership } from "../src/generated/orbpro/stream/buffer-ownership.js";
@@ -88,6 +89,7 @@ function hasPivIdentifier(bytes) {
 
 test("public invoke API exposes only SDS PIV envelopes", () => {
   assert.equal(typeof sdk.encodePluginInvokeRequest, "function");
+  assert.equal(typeof sdk.writePluginInvokeRequestToArena, "function");
   assert.equal(typeof sdk.decodePluginInvokeRequest, "function");
   assert.equal(typeof sdk.encodeLegacyPluginInvokeRequest, "undefined");
   assert.equal(typeof sdk.decodeLegacyPluginInvokeRequest, "undefined");
@@ -97,6 +99,11 @@ test("public invoke API exposes only SDS PIV envelopes", () => {
 function getPivRequest(bytes) {
   const bb = new flatbuffers.ByteBuffer(bytes);
   return PIV.getRootAsPIV(bb).REQUEST();
+}
+
+function getPivResponse(bytes) {
+  const bb = new flatbuffers.ByteBuffer(bytes);
+  return PIV.getRootAsPIV(bb).RESPONSE();
 }
 
 function encodeExternalArenaPivRequest({
@@ -325,7 +332,7 @@ function instantiateWithWasi(wasmBytes, imports = {}, wasi = createWasi()) {
   return { module, instance, wasi };
 }
 
-function invokeDirect(instance, requestBytes) {
+function invokeDirectBytes(instance, requestBytes) {
   const alloc = instance.exports.plugin_alloc;
   const free = instance.exports.plugin_free;
   const invoke = instance.exports.plugin_invoke_stream;
@@ -343,9 +350,16 @@ function invokeDirect(instance, requestBytes) {
   free(responsePtr, responseLen);
   free(lenOutPtr, 4);
 
+  return { memory, responseBytes };
+}
+
+function invokeDirect(instance, requestBytes) {
+  const { memory, responseBytes } = invokeDirectBytes(instance, requestBytes);
   return {
     responseBytes,
-    response: decodePluginInvokeResponse(responseBytes),
+    response: decodePluginInvokeResponse(responseBytes, {
+      externalArena: new Uint8Array(memory.buffer),
+    }),
   };
 }
 
@@ -528,6 +542,75 @@ test("public invoke decoder materializes SDS PIV external arenas only when provi
     ),
     [9, 10, 11, 12],
   );
+});
+
+test("public invoke encoder can describe SharedArrayBuffer external payload arenas without copying them into PIV", () => {
+  if (typeof SharedArrayBuffer !== "function") {
+    return;
+  }
+  const externalArena = new Uint8Array(new SharedArrayBuffer(64));
+  externalArena.set([9, 10, 11, 12], 16);
+
+  const encodedRequest = encodePluginInvokeRequest({
+    methodId: "external-arena",
+    externalArena,
+    inputs: [
+      {
+        portId: "coverage",
+        offset: 16,
+        size: 4,
+        alignment: 8,
+        typeRef: {
+          schemaName: "SCV/main.fbs",
+          fileIdentifier: "$SCV",
+          rootTypeName: "SCV",
+        },
+      },
+    ],
+  });
+
+  const request = getPivRequest(encodedRequest);
+  assert.equal(request.payloadArenaArray().length, 0);
+  assert.equal(request.INPUTS(0).OFFSET(), 16);
+  assert.equal(request.INPUTS(0).SIZE(), 4);
+
+  const decoded = decodePluginInvokeRequest(encodedRequest, { externalArena });
+  assert.equal(decoded.payloadArena.length, 0);
+  assert.equal(decoded.inputs[0].payload.buffer, externalArena.buffer);
+  assert.deepEqual(Array.from(decoded.inputs[0].payload), [9, 10, 11, 12]);
+});
+
+test("public invoke encoder can author direct PIV requests inside a supplied arena", () => {
+  const externalArena = new Uint8Array(new ArrayBuffer(64));
+  externalArena.set([9, 10, 11, 12], 16);
+  const requestArena = new Uint8Array(new ArrayBuffer(4096));
+
+  const encodedRequest = writePluginInvokeRequestToArena(
+    {
+      methodId: "external-arena",
+      externalArena,
+      inputs: [
+        {
+          portId: "coverage",
+          offset: 16,
+          size: 4,
+          alignment: 8,
+          typeRef: {
+            schemaName: "SCV/main.fbs",
+            fileIdentifier: "$SCV",
+            rootTypeName: "SCV",
+          },
+        },
+      ],
+    },
+    requestArena,
+  );
+
+  assert.equal(encodedRequest.buffer, requestArena.buffer);
+  assert.equal(hasPivIdentifier(encodedRequest), true);
+  const decoded = decodePluginInvokeRequest(encodedRequest, { externalArena });
+  assert.equal(decoded.payloadArena.length, 0);
+  assert.deepEqual(Array.from(decoded.inputs[0].payload), [9, 10, 11, 12]);
 });
 
 test("plugin invoke envelopes round-trip large payload arenas without stack overflow", () => {
@@ -1138,6 +1221,63 @@ test("direct invoke ABI accepts SDS PIV TAB payloads from SDK-owned guest memory
     assert.equal(response.traceId, 55n);
     assert.equal(response.outputs.length, 1);
     assert.equal(response.outputs[0].portId, "alpha");
+    assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payload));
+
+    free(payloadPtr, payload.length);
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("direct invoke ABI emits output TAB descriptors into guest memory without response payload copies", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-direct-output-descriptors",
+    invokeSurfaces: ["direct"],
+    methodId: "fanout",
+    inputPortIds: ["alpha"],
+    outputPortIds: ["alpha"],
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: FANOUT_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const alloc = instance.exports.plugin_alloc;
+    const free = instance.exports.plugin_free;
+    const memory = instance.exports.memory;
+    const payload = createPayload("direct-output-descriptor");
+    const payloadPtr = alloc(payload.length);
+    new Uint8Array(memory.buffer, payloadPtr, payload.length).set(payload);
+
+    const { responseBytes } = invokeDirectBytes(
+      instance,
+      encodeExternalArenaPivRequest({
+        methodId: "fanout",
+        traceId: 99n,
+        offset: payloadPtr,
+        size: payload.length,
+      }),
+    );
+    const responseTable = getPivResponse(responseBytes);
+    assert.equal(responseTable.payloadArenaArray().length, 0);
+    assert.equal(responseTable.outputsLength(), 1);
+
+    const output = responseTable.OUTPUTS(0);
+    assert.equal(output.OFFSET(), payloadPtr);
+    assert.equal(output.SIZE(), payload.length);
+    assert.equal(output.OWNERSHIP(), SdsBufferOwnership.PLUGIN_OWNED);
+
+    const response = decodePluginInvokeResponse(responseBytes, {
+      externalArena: new Uint8Array(memory.buffer),
+    });
+    assert.equal(response.statusCode, 0);
+    assert.equal(response.traceId, 99n);
+    assert.equal(response.outputs.length, 1);
+    assert.equal(response.outputs[0].payload.buffer, memory.buffer);
+    assert.equal(response.outputs[0].payload.byteOffset, payloadPtr);
     assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payload));
 
     free(payloadPtr, payload.length);

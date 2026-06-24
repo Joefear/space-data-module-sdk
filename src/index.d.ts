@@ -170,6 +170,7 @@ export interface PluginInvokeRequestEnvelope {
   methodId: string;
   inputs?: InvokeFrame[];
   inputFrames?: InvokeFrame[];
+  externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
   payloadArena?: Uint8Array;
   traceId?: bigint | number | string;
   outputStreamCap?: number;
@@ -182,6 +183,7 @@ export interface PluginInvokeResponseEnvelope {
   backlogRemaining?: number;
   outputs?: InvokeFrame[];
   outputFrames?: InvokeFrame[];
+  externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
   payloadArena?: Uint8Array;
   errorCode?: string | null;
   errorMessage?: string | null;
@@ -204,6 +206,10 @@ export interface DecodePluginInvokeEnvelopeOptions {
 
 export function encodePluginInvokeRequest(
   request: PluginInvokeRequestEnvelope,
+): Uint8Array;
+export function writePluginInvokeRequestToArena(
+  request: PluginInvokeRequestEnvelope,
+  arena: Uint8Array | ArrayBuffer | ArrayBufferView,
 ): Uint8Array;
 export function decodePluginInvokeRequest(
   data: Uint8Array | ArrayBuffer | ArrayBufferView,
@@ -934,6 +940,11 @@ export function compileModuleFromSource(options: {
   language?: string;
   threadModel?: ModuleThreadModelName;
   outputPath?: string;
+  importedMemory?: boolean;
+  sharedMemory?: boolean;
+  initialMemoryBytes?: number;
+  maximumMemoryBytes?: number;
+  emscriptenRoot?: string;
   allowUndefinedImports?: boolean;
 }): Promise<CompilationResult>;
 
@@ -1813,8 +1824,29 @@ export interface BrowserModuleHarness {
   invokeRaw(
     requestBytes: Uint8Array | ArrayBuffer | ArrayBufferView,
   ): Promise<Uint8Array>;
+  invokeDirect(request: {
+    methodId?: string | null;
+    /**
+     * Browser direct invoke requires this to be a full view of the active
+     * SharedArrayBuffer-backed module memory; foreign arenas and
+     * payload-bearing frames are rejected.
+     */
+    externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
+    inputs?: HarnessInputFrame[];
+  }): Promise<{
+    statusCode: number;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    outputs: HarnessInputFrame[];
+  }>;
   invoke(request: {
     methodId?: string | null;
+    /**
+     * Browser direct invoke requires this to be a full view of the active
+     * SharedArrayBuffer-backed module memory; foreign arenas and
+     * payload-bearing frames are rejected.
+     */
+    externalArena?: Uint8Array | ArrayBuffer | ArrayBufferView;
     inputs?: HarnessInputFrame[];
   }): Promise<{
     statusCode: number;
@@ -1841,6 +1873,7 @@ export function createBrowserModuleHarness(options?: {
   wasmMemory?: WebAssembly.Memory;
   memory?: WebAssembly.Memory;
   sharedMemory?: boolean;
+  allowRawInvoke?: boolean;
   initialMemoryBytes?: number;
   maximumMemoryBytes?: number;
   logOutput?: boolean;
