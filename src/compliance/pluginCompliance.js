@@ -27,7 +27,10 @@ import {
   getWasmCustomSections,
   parseWasmModuleSections,
 } from "../bundle/wasm.js";
-import { stripPublicationRecordCollection } from "../transport/records.js";
+import {
+  extractPublicationRecordCollection,
+  stripPublicationRecordCollection,
+} from "../transport/records.js";
 
 const RecommendedCapabilitySet = new Set(RecommendedCapabilityIds);
 const StandaloneWasiCapabilitySet = new Set(StandaloneWasiCapabilityIds);
@@ -1619,9 +1622,26 @@ function decodeManifestCandidate(candidate, options = {}) {
  * there.
  */
 export function locateEmbeddedPlgManifest(wasmBytes, options = {}) {
-  const bytes = wasmBytes instanceof Uint8Array
+  const inputBytes = wasmBytes instanceof Uint8Array
     ? wasmBytes
     : new Uint8Array(wasmBytes);
+  const protectedArtifact = extractPublicationRecordCollection(inputBytes);
+  for (const entry of protectedArtifact?.mbl?.entries ?? []) {
+    if (
+      entry?.entryId !== "manifest" &&
+      entry?.sectionName !== SDS_MANIFEST_SECTION_NAME
+    ) {
+      continue;
+    }
+    const located = decodeManifestCandidate(
+      new Uint8Array(entry.payload ?? []),
+      options,
+    );
+    if (located) {
+      return { ...located, source: "bundle-manifest" };
+    }
+  }
+  const bytes = protectedArtifact?.payloadBytes ?? inputBytes;
   for (const sectionBytes of getWasmCustomSections(bytes, SDS_MANIFEST_SECTION_NAME)) {
     const located = decodeManifestCandidate(sectionBytes, options);
     if (located) {

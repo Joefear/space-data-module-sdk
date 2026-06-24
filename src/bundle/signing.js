@@ -1,8 +1,10 @@
 import {
   computeCanonicalModuleHash,
   createSingleFileBundle,
+  getWasmCustomSections,
   parseSingleFileBundle,
 } from "./wasm.js";
+import { SDS_MANIFEST_SECTION_NAME } from "./constants.js";
 import {
   extractPublicationRecordCollection,
 } from "../transport/records.js";
@@ -132,6 +134,12 @@ export async function signModuleArtifact(bytes, options = {}) {
       }
       return true;
     });
+  }
+  if (!manifestBytes) {
+    manifestBytes = getWasmCustomSections(
+      payloadBytes,
+      SDS_MANIFEST_SECTION_NAME,
+    )[0];
   }
 
   const rebuilt = await createSingleFileBundle({

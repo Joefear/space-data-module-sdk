@@ -14,8 +14,12 @@ import {
 } from "../src/bundle/signing.js";
 import {
   createSingleFileBundle,
+  appendWasmCustomSection,
   parseSingleFileBundle,
 } from "../src/bundle/wasm.js";
+import { SDS_MANIFEST_SECTION_NAME } from "../src/bundle/constants.js";
+import { locateEmbeddedPlgManifest } from "../src/compliance/index.js";
+import { encodePluginManifest } from "../src/manifest/index.js";
 import { loadModule } from "../src/host/isomorphicLoader.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,6 +41,27 @@ function buildTestWasm() {
     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
     0x00, 0x05, 0x01, 0x78, 0x01, 0x02, 0x03,
   ]);
+}
+
+function buildCompiledStyleManifest() {
+  return {
+    pluginId: "com.digitalarsenal.tests.signed-raw-plg",
+    name: "Signed Raw PLG Module",
+    version: "1.0.0",
+    pluginFamily: "analysis",
+    capabilities: ["clock"],
+    invokeSurfaces: ["direct"],
+    runtimeTargets: ["browser"],
+    methods: [
+      {
+        methodId: "invoke",
+        inputPorts: [],
+        outputPorts: [],
+        maxBatch: 1,
+        drainPolicy: "single-shot",
+      },
+    ],
+  };
 }
 
 test("dev keypair fixture exists and is well-formed", async () => {
@@ -173,6 +198,39 @@ test("signing preserves existing bundle manifest and entries", async () => {
     requireSignature: true,
   });
   assert.equal(result.verified, true);
+});
+
+test("signing raw compiled wasm preserves the embedded PLG manifest", async () => {
+  const keypair = await loadDevKeypair();
+  const manifest = buildCompiledStyleManifest();
+  const wasm = appendWasmCustomSection(
+    buildTestWasm(),
+    SDS_MANIFEST_SECTION_NAME,
+    encodePluginManifest(manifest),
+  );
+  assert.equal(
+    locateEmbeddedPlgManifest(wasm, {
+      expectedPluginId: manifest.pluginId,
+      expectedVersion: manifest.version,
+    })?.source,
+    "custom-section",
+  );
+
+  const signed = await signModuleArtifact(wasm, {
+    privateKeySeedHex: keypair.privateKeySeedHex,
+    keyId: keypair.keyId,
+  });
+
+  const located = locateEmbeddedPlgManifest(signed.wasmBytes, {
+    expectedPluginId: manifest.pluginId,
+    expectedVersion: manifest.version,
+  });
+  assert.equal(located?.source, "bundle-manifest");
+  assert.equal(located.decoded.pluginId, manifest.pluginId);
+
+  const parsed = await parseSingleFileBundle(signed.wasmBytes);
+  const manifestEntry = parsed.entries.find((entry) => entry.entryId === "manifest");
+  assert.equal(manifestEntry?.decodedManifest?.pluginId, manifest.pluginId);
 });
 
 test("re-signing replaces the previous signature entry", async () => {
