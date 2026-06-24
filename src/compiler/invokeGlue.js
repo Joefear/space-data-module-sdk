@@ -1240,11 +1240,30 @@ extern "C" int32_t plugin_push_output_typed(
   frame.alignment = required_alignment > 0 ? required_alignment : 8;
   frame.payload_ptr = payload_ptr;
   frame.payload_length = payload_length;
-  if (!g_invoke_context.direct_external_arena_outputs && payload_ptr && payload_length > 0u) {
+  bool payload_is_sdk_owned = false;
+  if (payload_ptr && payload_length > 0u) {
+    const uintptr_t payload_address = reinterpret_cast<uintptr_t>(payload_ptr);
+    payload_is_sdk_owned =
+      payload_address <= std::numeric_limits<uint32_t>::max() &&
+      AllocationContains(static_cast<uint32_t>(payload_address), payload_length);
+  }
+  if (
+    payload_ptr &&
+    payload_length > 0u &&
+    (!g_invoke_context.direct_external_arena_outputs || !payload_is_sdk_owned)
+  ) {
     frame.payload.insert(frame.payload.end(), payload_ptr, payload_ptr + payload_length);
   }
 
   g_invoke_context.outputs.emplace_back(std::move(frame));
+  OutputFrameOwned &stored_frame = g_invoke_context.outputs.back();
+  if (
+    g_invoke_context.direct_external_arena_outputs &&
+    !stored_frame.payload.empty()
+  ) {
+    stored_frame.payload_ptr = stored_frame.payload.data();
+    stored_frame.payload_length = static_cast<uint32_t>(stored_frame.payload.size());
+  }
   return static_cast<int32_t>(g_invoke_context.outputs.size() - 1u);
 }
 

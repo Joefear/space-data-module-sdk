@@ -259,6 +259,29 @@ int fanout(void) {
 }
 `;
 
+const LOCAL_OUTPUT_SOURCE = `#include <stdint.h>
+#include "space_data_module_invoke.h"
+
+int local_output(void) {
+  plugin_reset_output_state();
+  uint8_t payload[8] = { 1, 1, 2, 3, 5, 8, 13, 21 };
+  const int32_t output_index = plugin_push_output(
+    "alpha",
+    "Blob.fbs",
+    "BLOB",
+    payload,
+    8
+  );
+  if (output_index < 0) {
+    return 4;
+  }
+  for (uint32_t index = 0; index < 8; index += 1) {
+    payload[index] = 0;
+  }
+  return 0;
+}
+`;
+
 const STREAM_OUTPUT_SOURCE = `#include <stdint.h>
 #include "space_data_module_invoke.h"
 
@@ -1281,6 +1304,57 @@ test("direct invoke ABI emits output TAB descriptors into guest memory without r
     assert.deepEqual(Array.from(response.outputs[0].payload), Array.from(payload));
 
     free(payloadPtr, payload.length);
+  } finally {
+    await cleanupCompilation(compilation);
+  }
+});
+
+test("direct invoke ABI owns plugin_push_output payload lifetime", async () => {
+  const manifest = createInvokeManifest({
+    pluginId: "com.digitalarsenal.examples.invoke-local-output-lifetime",
+    invokeSurfaces: ["direct"],
+    methodId: "local_output",
+    inputPortIds: ["alpha"],
+    outputPortIds: ["alpha"],
+  });
+  const compilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: LOCAL_OUTPUT_SOURCE,
+    language: "c",
+  });
+
+  try {
+    const { instance } = instantiateWithWasi(compilation.wasmBytes);
+    const alloc = instance.exports.plugin_alloc;
+    const free = instance.exports.plugin_free;
+    const memory = instance.exports.memory;
+    const input = createPayload("local-output-lifetime");
+    const inputPtr = alloc(input.length);
+    new Uint8Array(memory.buffer, inputPtr, input.length).set(input);
+
+    const { responseBytes } = invokeDirectBytes(
+      instance,
+      encodeExternalArenaPivRequest({
+        methodId: "local_output",
+        traceId: 101n,
+        offset: inputPtr,
+        size: input.length,
+      }),
+    );
+    const responseTable = getPivResponse(responseBytes);
+    assert.equal(responseTable.payloadArenaArray().length, 0);
+
+    const response = decodePluginInvokeResponse(responseBytes, {
+      externalArena: new Uint8Array(memory.buffer),
+    });
+    assert.equal(response.statusCode, 0);
+    assert.equal(response.traceId, 101n);
+    assert.deepEqual(
+      Array.from(response.outputs[0].payload),
+      [1, 1, 2, 3, 5, 8, 13, 21],
+    );
+
+    free(inputPtr, input.length);
   } finally {
     await cleanupCompilation(compilation);
   }
