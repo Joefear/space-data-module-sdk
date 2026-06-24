@@ -488,6 +488,25 @@ test("non-canonical capability produces warning", () => {
   assert.ok(report.warnings.some((w) => w.code === "noncanonical-capability"));
 });
 
+test("gpu_compute is a canonical optional host capability", () => {
+  const m = createValidManifest();
+  m.runtimeTargets = ["browser", "wasmedge"];
+  m.capabilities = [
+    "clock",
+    {
+      capability: "gpu_compute",
+      scope: "webgpu.v1",
+      required: false,
+    },
+  ];
+  const report = validatePluginManifest(m);
+  assert.equal(report.ok, true);
+  assert.equal(
+    report.warnings.some((w) => w.code === "noncanonical-capability"),
+    false,
+  );
+});
+
 test("non-string capability produces error", () => {
   const m = createValidManifest();
   m.capabilities = [123];

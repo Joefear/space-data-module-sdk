@@ -1,0 +1,64 @@
+{
+  "pluginId": "com.example.gpu-module",
+  "name": "GPU Module Template",
+  "version": "0.1.0",
+  "pluginFamily": "analysis",
+  "runtimeTargets": ["browser", "wasmedge"],
+  "invokeSurfaces": ["direct", "command"],
+  "externalInterfaces": [],
+  "capabilities": [
+    "clock",
+    {
+      "capability": "gpu_compute",
+      "scope": "webgpu.v1",
+      "required": false,
+      "description": "Optional WebGPU/Dawn compute acceleration."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "run",
+      "displayName": "Run",
+      "inputPorts": [
+        {
+          "portId": "request",
+          "acceptedTypeSets": [
+            {
+              "setId": "omm-request",
+              "allowedTypes": [
+                {
+                  "schemaName": "OMM.fbs",
+                  "fileIdentifier": "$OMM"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "response",
+          "acceptedTypeSets": [
+            {
+              "setId": "catalog-response",
+              "allowedTypes": [
+                {
+                  "schemaName": "CAT.fbs",
+                  "fileIdentifier": "$CAT"
+                }
+              ]
+            }
+          ],
+          "minStreams": 0,
+          "maxStreams": 1,
+          "required": false
+        }
+      ],
+      "maxBatch": 1,
+      "drainPolicy": "drain-to-empty"
+    }
+  ]
+}

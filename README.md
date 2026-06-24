@@ -261,6 +261,27 @@ semantics.
 The supported isomorphic profile and browser edge shims are documented in
 [`docs/browser-wasmedge-isomorphic.md`](./docs/browser-wasmedge-isomorphic.md).
 
+GPU-accelerated modules should follow the host-owned GPU capability standard in
+[`docs/gpu-module-abi.md`](./docs/gpu-module-abi.md). The reusable C/C++ layout
+header and starter manifest live in
+[`templates/gpu-module`](./templates/gpu-module).
+
+The GPU surface is intentionally host-owned. A portable module advertises the
+optional `gpu_compute` capability with scope `webgpu.v1`, keeps a correct CPU
+fallback in `dist/isomorphic/module.wasm`, and lets the embedding host choose a
+backend:
+
+- browser hosts use WebGPU through a browser adapter
+- WasmEdge deployments use a native host extension backed by Dawn
+- modules share the SDK C/C++ layout header for dispatch descriptors, result
+  records, buffer roles, and split high/low `f32` representations of `f64`
+  values
+
+The public invoke API should remain domain-specific. GPU command buffers,
+devices, queue ownership, and asynchronous buffer mapping stay behind the host
+capability boundary rather than becoming new sync `space_data_module_host`
+imports.
+
 The checked-in same-artifact demo lives in
 [`examples/isomorphic-loader`](./examples/isomorphic-loader):
 
@@ -546,8 +567,8 @@ includes:
 `protocol_dial` `database` `storage_adapter` `storage_query` `storage_write`
 `context_read` `context_write` `process_exec` `crypto_hash` `crypto_sign`
 `crypto_verify` `crypto_encrypt` `crypto_decrypt` `crypto_key_agreement`
-`crypto_kdf` `wallet_sign` `ipfs` `scene_access` `entity_access`
-`render_hooks`
+`crypto_kdf` `wallet_sign` `ipfs` `gpu_compute` `scene_access`
+`entity_access` `render_hooks`
 
 Manifests can also declare coarse runtime targets for planning and compliance:
 

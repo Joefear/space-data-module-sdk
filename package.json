@@ -55,8 +55,10 @@
   },
   "files": [
     "bin/",
+    "docs/",
     "schemas/",
-    "src/"
+    "src/",
+    "templates/"
   ],
   "scripts": {
     "test": "node --test",

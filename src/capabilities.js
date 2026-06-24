@@ -32,6 +32,7 @@ export const RecommendedCapabilityIds = Object.freeze([
   "crypto_kdf",
   "wallet_sign",
   "ipfs",
+  "gpu_compute",
   "scene_access",
   "entity_access",
   "render_hooks",
