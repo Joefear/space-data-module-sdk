@@ -80,6 +80,7 @@ const STANDALONE_SHARED_MEMORY_ENV_STUBS = Object.freeze({
   pthread_cond_wait: () => 0,
   emscripten_thread_sleep: () => {},
   __do_set_thread_state: () => {},
+  __get_tp: () => 0,
 });
 const STANDALONE_SHARED_MEMORY_ENV_IMPORTS = new Set([
   "memory",
