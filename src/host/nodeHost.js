@@ -29,6 +29,7 @@ import {
   x25519PublicKey,
   x25519SharedSecret,
 } from "../utils/wasmCrypto.js";
+import { derSignatureToRaw, rawSignatureToDer } from "../utils/ecdsaDer.js";
 import {
   matchesCronExpression,
   nextCronOccurrence,
@@ -120,6 +121,8 @@ export const NodeHostSupportedOperations = Object.freeze([
   "crypto.secp256k1.publicKeyFromPrivate",
   "crypto.secp256k1.signDigest",
   "crypto.secp256k1.verifyDigest",
+  "crypto.secp256k1.sign",
+  "crypto.secp256k1.verify",
   "crypto.ed25519.publicKeyFromSeed",
   "crypto.ed25519.sign",
   "crypto.ed25519.verify",
@@ -2255,6 +2258,14 @@ export class NodeHost {
           params.signature,
           params.publicKey,
         );
+      case "crypto.secp256k1.sign":
+        return this.crypto.secp256k1.sign(params.message, params.privateKey);
+      case "crypto.secp256k1.verify":
+        return this.crypto.secp256k1.verify(
+          params.message,
+          params.signature,
+          params.publicKey,
+        );
       case "crypto.ed25519.publicKeyFromSeed":
         return this.crypto.ed25519.publicKeyFromSeed(params.seed);
       case "crypto.ed25519.sign":
@@ -2382,6 +2393,32 @@ export class NodeHost {
               toUint8Array(signature),
               toUint8Array(publicKey),
             ),
+        ),
+      // Message-based ECDSA-DER contract (parity with the Go/C++ hosts and the
+      // synchronous host-crypto ABI): sha256 the message internally, then use
+      // the digest-based primitives with DER <-> raw conversion.
+      sign: async (message, privateKey) =>
+        this.#withCapability("crypto_sign", "crypto.secp256k1.sign", async () => {
+          const digest = await sha256Bytes(toUint8Array(message));
+          const rawSignature = await secp256k1SignDigest(
+            toUint8Array(digest),
+            toUint8Array(privateKey),
+          );
+          return rawSignatureToDer(rawSignature);
+        }),
+      verify: async (message, signature, publicKey) =>
+        this.#withCapability(
+          "crypto_verify",
+          "crypto.secp256k1.verify",
+          async () => {
+            const digest = await sha256Bytes(toUint8Array(message));
+            const result = await secp256k1VerifyDigest(
+              toUint8Array(digest),
+              derSignatureToRaw(signature),
+              toUint8Array(publicKey),
+            );
+            return { result: Boolean(result) };
+          },
         ),
     }),
     ed25519: Object.freeze({

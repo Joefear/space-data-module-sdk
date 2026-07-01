@@ -272,3 +272,51 @@ test("browser host exposes shared-wallet crypto operations through the sync host
     message,
   );
 });
+
+test("browser host verifies secp256k1 ECDSA-DER signatures through the sync hostcall dispatcher", async () => {
+  const wallet = await getWasmWallet();
+  const host = createBrowserHost({
+    capabilities: ["crypto_hash", "crypto_sign", "crypto_verify"],
+    wasmWallet: wallet,
+  });
+  const dispatch = createHostSyncDispatcher(host);
+  const message = new TextEncoder().encode("epm-secp256k1-message");
+  const privateKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+
+  assert.equal(
+    host.listOperations().includes("crypto.secp256k1.verify"),
+    true,
+  );
+
+  const publicKey = dispatch("crypto.secp256k1.publicKeyFromPrivate", {
+    privateKey,
+  });
+  assert.equal(publicKey.length, 33);
+
+  const signature = dispatch("crypto.secp256k1.sign", {
+    message,
+    privateKey,
+  });
+  // DER ECDSA signatures are a SEQUENCE (0x30 tag).
+  assert.equal(signature[0], 0x30);
+
+  assert.deepEqual(
+    dispatch("crypto.secp256k1.verify", {
+      message,
+      signature,
+      publicKey,
+    }),
+    { result: true },
+  );
+
+  // Negative: a different message must not verify against the signature.
+  const tamperedMessage = new TextEncoder().encode("epm-secp256k1-message!");
+  assert.deepEqual(
+    dispatch("crypto.secp256k1.verify", {
+      message: tamperedMessage,
+      signature,
+      publicKey,
+    }),
+    { result: false },
+  );
+});

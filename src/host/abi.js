@@ -260,6 +260,25 @@ export function dispatchHostSyncOperation(host, operation, params = null) {
         ),
         normalized,
       );
+    case "crypto.secp256k1.publicKeyFromPrivate":
+      return assertSyncHostcallResult(
+        host.crypto.secp256k1.publicKeyFromPrivate(params?.privateKey),
+        normalized,
+      );
+    case "crypto.secp256k1.sign":
+      return assertSyncHostcallResult(
+        host.crypto.secp256k1.sign(params?.message, params?.privateKey),
+        normalized,
+      );
+    case "crypto.secp256k1.verify":
+      return assertSyncHostcallResult(
+        host.crypto.secp256k1.verify(
+          params?.message,
+          params?.signature,
+          params?.publicKey,
+        ),
+        normalized,
+      );
     case "crypto.ed25519.publicKeyFromSeed":
       return assertSyncHostcallResult(
         host.crypto.ed25519.publicKeyFromSeed(params?.seed),

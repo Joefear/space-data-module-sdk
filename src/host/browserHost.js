@@ -7,6 +7,7 @@
 
 import { RuntimeTarget } from "../runtime/constants.js";
 import { toUint8Array } from "../utils/encoding.js";
+import { derSignatureToRaw, rawSignatureToDer } from "../utils/ecdsaDer.js";
 import {
   parseCronExpression,
   matchesCronExpression,
@@ -86,6 +87,9 @@ export const BrowserHostSupportedOperations = Object.freeze([
   "crypto.x25519.generateKeypair",
   "crypto.x25519.publicKey",
   "crypto.x25519.sharedSecret",
+  "crypto.secp256k1.publicKeyFromPrivate",
+  "crypto.secp256k1.sign",
+  "crypto.secp256k1.verify",
   "crypto.ed25519.publicKeyFromSeed",
   "crypto.ed25519.sign",
   "crypto.ed25519.verify",
@@ -590,6 +594,60 @@ export class BrowserHost {
           ),
         );
       },
+      secp256k1: Object.freeze({
+        publicKeyFromPrivate: (privateKey) => {
+          this.#assertCapability(
+            "crypto_sign",
+            "crypto.secp256k1.publicKeyFromPrivate",
+          );
+          if (!wasmWallet?.curves?.publicKeyFromPrivate) {
+            throw new Error(
+              "Browser host crypto.secp256k1.publicKeyFromPrivate requires a preloaded wasmWallet.",
+            );
+          }
+          return new Uint8Array(
+            wasmWallet.curves.publicKeyFromPrivate(toUint8Array(privateKey)),
+          );
+        },
+        sign: (message, privateKey) => {
+          this.#assertCapability("crypto_sign", "crypto.secp256k1.sign");
+          if (
+            !wasmWallet?.utils?.sha256 ||
+            !wasmWallet?.curves?.secp256k1?.sign
+          ) {
+            throw new Error(
+              "Browser host crypto.secp256k1.sign requires a preloaded wasmWallet.",
+            );
+          }
+          const digest = new Uint8Array(
+            wasmWallet.utils.sha256(toUint8Array(message)),
+          );
+          const rawSignature = new Uint8Array(
+            wasmWallet.curves.secp256k1.sign(digest, toUint8Array(privateKey)),
+          );
+          return rawSignatureToDer(rawSignature);
+        },
+        verify: (message, signature, publicKey) => {
+          this.#assertCapability("crypto_verify", "crypto.secp256k1.verify");
+          if (
+            !wasmWallet?.utils?.sha256 ||
+            !wasmWallet?.curves?.secp256k1?.verify
+          ) {
+            throw new Error(
+              "Browser host crypto.secp256k1.verify requires a preloaded wasmWallet.",
+            );
+          }
+          const digest = new Uint8Array(
+            wasmWallet.utils.sha256(toUint8Array(message)),
+          );
+          const result = wasmWallet.curves.secp256k1.verify(
+            digest,
+            derSignatureToRaw(signature),
+            toUint8Array(publicKey),
+          );
+          return { result: Boolean(result) };
+        },
+      }),
       ed25519: Object.freeze({
         publicKeyFromSeed: (seed) => {
           this.#assertCapability("crypto_sign", "crypto.ed25519.publicKeyFromSeed");
@@ -803,6 +861,16 @@ export class BrowserHost {
       case "crypto.x25519.sharedSecret":
         return this.crypto.x25519SharedSecret(
           params.privateKey,
+          params.publicKey,
+        );
+      case "crypto.secp256k1.publicKeyFromPrivate":
+        return this.crypto.secp256k1.publicKeyFromPrivate(params.privateKey);
+      case "crypto.secp256k1.sign":
+        return this.crypto.secp256k1.sign(params.message, params.privateKey);
+      case "crypto.secp256k1.verify":
+        return this.crypto.secp256k1.verify(
+          params.message,
+          params.signature,
           params.publicKey,
         );
       case "crypto.ed25519.publicKeyFromSeed":
