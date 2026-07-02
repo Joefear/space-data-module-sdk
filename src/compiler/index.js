@@ -17,3 +17,4 @@ export {
   loadSharedEmception,
   withSharedEmception,
 } from "./emception.js";
+export { generateLegacySdnShimSource } from "./sdnShimGenerator.js";

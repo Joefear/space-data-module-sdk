@@ -41,7 +41,7 @@
     },
     "./host/browser": "./src/host/browserHost.js",
     "./host/timer-driver": "./src/host/timerDriver.js",
-    "./flow": "./src/flow/flowRuntimeHost.js",
+    "./flow": "./src/flow/index.js",
     "./host/browser-edge-shims": "./src/host/browserEdgeShims.js",
     "./host/wasi-shim": "./src/host/wasiShim.js",
     "./host/isomorphic": "./src/host/isomorphicLoader.js",
@@ -53,7 +53,8 @@
     "./testing": "./src/testing/index.js",
     "./standards": "./src/standards/index.js",
     "./utils/wasm-crypto": "./src/utils/wasmCrypto.js",
-    "./schemas/*": "./schemas/*"
+    "./schemas/*": "./schemas/*",
+    "./compat": "./src/compat/index.js"
   },
   "files": [
     "bin/",

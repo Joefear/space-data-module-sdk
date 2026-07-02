@@ -111,3 +111,6 @@ export {
   createModuleRegistry,
   createRuntimeRegionStore,
 };
+// Flow-tier validating method registry (vendored sdn-flow semantics; distinct
+// from createModuleRegistry's module-lifecycle registry).
+export { MethodRegistry } from "./methodRegistry.js";

@@ -49,7 +49,18 @@ export async function createFlowRuntimeHost(options = {}) {
     env: options.env ?? {},
     logOutput: options.logOutput === true,
   });
-  const instance = await WebAssembly.instantiate(wasmModule, { ...wasi.imports });
+  const imports = { ...wasi.imports, ...(options.extraImports ?? {}) };
+  if (options.legacyHostImportCompat === true) {
+    // Legacy compiled-flow artifacts import a `sdn_flow_host` module; stub its
+    // dispatch entry (0 = caller wins) so they instantiate under plain
+    // WebAssembly.instantiate. Ported from orbpro-integration's
+    // withLegacyHostImportCompat; the module name + stub are ABI contracts.
+    imports.sdn_flow_host = {
+      dispatch_current_invocation: () => 0,
+      ...(imports.sdn_flow_host ?? {}),
+    };
+  }
+  const instance = await WebAssembly.instantiate(wasmModule, imports);
   const exports = instance.exports;
   const memory = exports.memory;
   if (!(memory instanceof WebAssembly.Memory)) {
