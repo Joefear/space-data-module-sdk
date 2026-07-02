@@ -1877,7 +1877,86 @@ export function createBrowserModuleHarness(options?: {
   initialMemoryBytes?: number;
   maximumMemoryBytes?: number;
   logOutput?: boolean;
+  hostcallDispatch?: (operation: string, params: unknown) => unknown;
 }): Promise<BrowserModuleHarness>;
+
+// --- Async in-WASM host bridge (WS6.1): worker harness + SAB channel ---
+export interface WorkerModuleHarness {
+  runtime: { kind: "worker"; inner?: unknown };
+  host: unknown;
+  buffer: SharedArrayBuffer;
+  exports: string[];
+  callExport(name: string, ...args: unknown[]): Promise<unknown>;
+  invoke(request: unknown): Promise<unknown>;
+  invokeRaw(requestBytes: Uint8Array): Promise<unknown>;
+  readMemory(ptr: number, length: number): Promise<Uint8Array>;
+  readManifest(): Promise<Uint8Array | null>;
+  destroy(): Promise<void>;
+}
+export function createWorkerModuleHarness(options: {
+  wasmSource: Uint8Array | ArrayBuffer;
+  host?: unknown;
+  hostOptions?: BrowserHostOptions;
+  dispatchHost?: (operation: string, params: unknown) => Promise<unknown>;
+  maxHostcallResponseBytes?: number;
+  hostcallTimeoutMs?: number;
+  workerUrl?: URL | string;
+  harnessOptions?: Record<string, unknown>;
+}): Promise<WorkerModuleHarness>;
+export function createSabHostcallBuffer(options?: {
+  maxResponseBytes?: number;
+}): SharedArrayBuffer;
+export function createSabHostcallClientDispatch(options: {
+  buffer: SharedArrayBuffer;
+  postRequest: (request: { operation: string; params: unknown }) => void;
+  timeoutMs?: number;
+}): (operation: string, params?: unknown) => unknown;
+export function createSabHostcallServer(options: {
+  buffer: SharedArrayBuffer;
+  dispatch: (operation: string, params: unknown) => Promise<unknown> | unknown;
+}): { handleRequest(request: { operation: string; params?: unknown }): Promise<void> };
+
+// --- Browser cron/timer driver (WS6.3) ---
+export interface ModuleTimerRunRecord {
+  timerId: string;
+  methodId: string;
+  trigger: "scheduled" | "manual";
+  status: "running" | "ok" | "error" | "skipped";
+  startedAt: number;
+  finishedAt?: number;
+  message?: string;
+}
+export interface ModuleTimerInfo {
+  timerId: string;
+  methodId: string;
+  description: string;
+  defaultIntervalMs: number;
+  intervalMs: number;
+  enabled: boolean;
+  scheduled: boolean;
+}
+export interface ModuleTimerDriver {
+  listTimers(): ModuleTimerInfo[];
+  runHistory(timerId: string): ModuleTimerRunRecord[];
+  start(): ModuleTimerInfo[];
+  runNow(timerId: string): Promise<unknown>;
+  stop(): void;
+}
+export function createModuleTimerDriver(options: {
+  harness?: { invoke(request: unknown): Promise<unknown> };
+  invoke?: (request: { methodId: string; inputs: unknown[] }) => Promise<unknown>;
+  manifestBytes?: Uint8Array;
+  manifest?: Record<string, unknown>;
+  timers?: Array<Record<string, unknown>>;
+  schedules?: Record<string, { enabled?: boolean; intervalMs?: number }>;
+  minIntervalMs?: number;
+  maxRunHistory?: number;
+  setIntervalImpl?: (fn: () => void, ms: number) => unknown;
+  clearIntervalImpl?: (handle: unknown) => void;
+  now?: () => number;
+  onRun?: (run: ModuleTimerRunRecord) => void;
+}): ModuleTimerDriver;
+
 export interface ModuleFlatBufferStreamPumpStats {
   bytesReceived: number;
   chunksReceived: number;
